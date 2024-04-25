@@ -114,11 +114,14 @@ func dialSendUDP(kdcs map[int]string, b []byte) ([]byte, error) {
 // dialSendUDPCustom establishes a custom UDP connection to a KDC.
 func dialSendUDPCustom(kdcs map[int]string, b []byte, udpConnGen func(string) (*net.UDPConn, error)) ([]byte, error) {
 	var errs []string
+	var err error
+	var conn *net.UDPConn
+
 	for i := 1; i <= len(kdcs); i++ {
 		if udpConnGen == nil {
-			conn, err := net.DialTimeout("udp", kdcs[i], 5*time.Second)
+			conn, err = net.DialTimeout("udp", kdcs[i], 5*time.Second)
 		} else {
-			conn, err := udpConnGen(kdcs[i])
+			conn, err = udpConnGen(kdcs[i])
 		}
 
 		if err != nil {
@@ -206,11 +209,14 @@ func dialSendTCP(kdcs map[int]string, b []byte) ([]byte, error) {
 // dialSendTCPCustom establishes a custom TCP connection to a KDC.
 func dialSendTCPCustom(kdcs map[int]string, b []byte, tcpConnGen func(string) (*net.TCPConn, error)) ([]byte, error) {
 	var errs []string
+	var err error
+	var conn *net.TCPConn
+
 	for i := 1; i <= len(kdcs); i++ {
 		if tcpConnGen == nil {
-			conn, err := net.DialTimeout("tcp", kdcs[i], 5*time.Second)
+			conn, err = net.DialTimeout("tcp", kdcs[i], 5*time.Second)
 		} else {
-			conn, err := tcpConnGen(kdcs[i])
+			conn, err = tcpConnGen(kdcs[i])
 		}
 
 		if err != nil {
