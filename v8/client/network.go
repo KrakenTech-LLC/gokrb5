@@ -115,7 +115,7 @@ func dialSendUDP(kdcs map[int]string, b []byte) ([]byte, error) {
 func dialSendUDPCustom(kdcs map[int]string, b []byte, udpConnGen func(string) (*net.UDPConn, error)) ([]byte, error) {
 	var errs []string
 	var err error
-	var conn *net.UDPConn
+	var conn net.Conn
 
 	for i := 1; i <= len(kdcs); i++ {
 		if udpConnGen == nil {
@@ -210,7 +210,7 @@ func dialSendTCP(kdcs map[int]string, b []byte) ([]byte, error) {
 func dialSendTCPCustom(kdcs map[int]string, b []byte, tcpConnGen func(string) (*net.TCPConn, error)) ([]byte, error) {
 	var errs []string
 	var err error
-	var conn *net.TCPConn
+	var conn net.Conn
 
 	for i := 1; i <= len(kdcs); i++ {
 		if tcpConnGen == nil {
