@@ -9,10 +9,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/jcmturner/gokrb5/v8/client"
-	"github.com/jcmturner/gokrb5/v8/config"
-	"github.com/jcmturner/gokrb5/v8/keytab"
-	"github.com/jcmturner/gokrb5/v8/test/testdata"
+	"github.com/KrakenTech-LLC/gokrb5/v8/client"
+	"github.com/KrakenTech-LLC/gokrb5/v8/config"
+	"github.com/KrakenTech-LLC/gokrb5/v8/keytab"
+	"github.com/KrakenTech-LLC/gokrb5/v8/test/testdata"
 )
 
 const (

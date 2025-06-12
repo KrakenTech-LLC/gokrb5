@@ -6,11 +6,11 @@ import (
 	"crypto/sha1"
 	"hash"
 
-	"github.com/jcmturner/gokrb5/v8/crypto/common"
-	"github.com/jcmturner/gokrb5/v8/crypto/rfc3961"
-	"github.com/jcmturner/gokrb5/v8/crypto/rfc3962"
-	"github.com/jcmturner/gokrb5/v8/iana/chksumtype"
-	"github.com/jcmturner/gokrb5/v8/iana/etypeID"
+	"github.com/KrakenTech-LLC/gokrb5/v8/crypto/common"
+	"github.com/KrakenTech-LLC/gokrb5/v8/crypto/rfc3961"
+	"github.com/KrakenTech-LLC/gokrb5/v8/crypto/rfc3962"
+	"github.com/KrakenTech-LLC/gokrb5/v8/iana/chksumtype"
+	"github.com/KrakenTech-LLC/gokrb5/v8/iana/etypeID"
 )
 
 // RFC 3962

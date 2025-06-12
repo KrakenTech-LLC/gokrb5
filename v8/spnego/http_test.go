@@ -17,14 +17,14 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/KrakenTech-LLC/gokrb5/v8/client"
+	"github.com/KrakenTech-LLC/gokrb5/v8/config"
+	"github.com/KrakenTech-LLC/gokrb5/v8/keytab"
+	"github.com/KrakenTech-LLC/gokrb5/v8/service"
+	"github.com/KrakenTech-LLC/gokrb5/v8/test"
+	"github.com/KrakenTech-LLC/gokrb5/v8/test/testdata"
 	"github.com/gorilla/sessions"
 	"github.com/jcmturner/goidentity/v6"
-	"github.com/jcmturner/gokrb5/v8/client"
-	"github.com/jcmturner/gokrb5/v8/config"
-	"github.com/jcmturner/gokrb5/v8/keytab"
-	"github.com/jcmturner/gokrb5/v8/service"
-	"github.com/jcmturner/gokrb5/v8/test"
-	"github.com/jcmturner/gokrb5/v8/test/testdata"
 	"github.com/stretchr/testify/assert"
 )
 
