@@ -20,7 +20,6 @@ import (
 	"github.com/KrakenTech-LLC/gokrb5/v8/krberror"
 	"github.com/KrakenTech-LLC/gokrb5/v8/service"
 	"github.com/KrakenTech-LLC/gokrb5/v8/types"
-	"
 )
 
 // Client side functionality //
