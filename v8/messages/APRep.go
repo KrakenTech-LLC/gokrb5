@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/KrakenTech-LLC/gokrb5/v8/iana/asnAppTag"
 	"github.com/KrakenTech-LLC/gokrb5/v8/iana/msgtype"
 	"github.com/KrakenTech-LLC/gokrb5/v8/krberror"
