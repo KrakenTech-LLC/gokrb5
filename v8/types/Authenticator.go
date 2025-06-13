@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/KrakenTech-LLC/gokrb5/v8/asn1tools"
 	"github.com/KrakenTech-LLC/gokrb5/v8/iana"
 	"github.com/KrakenTech-LLC/gokrb5/v8/iana/asnAppTag"
