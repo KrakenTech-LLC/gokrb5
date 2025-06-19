@@ -3,6 +3,7 @@ package client
 import (
 	"encoding/json"
 	"errors"
+	"github.com/jcmturner/gofork/encoding/asn1"
 	"sort"
 	"sync"
 	"time"
@@ -26,6 +27,7 @@ type CacheEntry struct {
 	EndTime    time.Time
 	RenewTill  time.Time
 	SessionKey types.EncryptionKey `json:"-"`
+	Flags      asn1.BitString
 }
 
 // NewCache creates a new client ticket cache instance.
@@ -41,6 +43,16 @@ func (c *Cache) getEntry(spn string) (CacheEntry, bool) {
 	defer c.mux.RUnlock()
 	e, ok := (*c).Entries[spn]
 	return e, ok
+}
+
+func (c *Cache) getEntries() []CacheEntry {
+	c.mux.RLock()
+	defer c.mux.RUnlock()
+	res := make([]CacheEntry, 0, len(c.Entries))
+	for _, entry := range c.Entries {
+		res = append(res, entry)
+	}
+	return res
 }
 
 // JSON returns information about the cached service tickets in a JSON format.
@@ -64,7 +76,7 @@ func (c *Cache) JSON() (string, error) {
 }
 
 // addEntry adds a ticket to the cache.
-func (c *Cache) addEntry(tkt messages.Ticket, authTime, startTime, endTime, renewTill time.Time, sessionKey types.EncryptionKey) CacheEntry {
+func (c *Cache) addEntry(tkt messages.Ticket, authTime, startTime, endTime, renewTill time.Time, sessionKey types.EncryptionKey, flags asn1.BitString) CacheEntry {
 	spn := tkt.SName.PrincipalNameString()
 	c.mux.Lock()
 	defer c.mux.Unlock()
@@ -76,6 +88,7 @@ func (c *Cache) addEntry(tkt messages.Ticket, authTime, startTime, endTime, rene
 		EndTime:    endTime,
 		RenewTill:  renewTill,
 		SessionKey: sessionKey,
+		Flags:      flags,
 	}
 	return c.Entries[spn]
 }
@@ -131,4 +144,8 @@ func (cl *Client) renewTicket(e CacheEntry) (CacheEntry, error) {
 	}
 	cl.Log("ticket renewed for %s (EndTime: %v)", spn.PrincipalNameString(), e.EndTime)
 	return e, nil
+}
+
+func (cl *Client) RemoveTicket(spn string) {
+	cl.cache.RemoveEntry(spn)
 }

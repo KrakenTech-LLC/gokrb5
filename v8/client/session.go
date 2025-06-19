@@ -3,6 +3,7 @@ package client
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/jcmturner/gofork/encoding/asn1"
 	"sort"
 	"strings"
 	"sync"
@@ -71,6 +72,8 @@ type session struct {
 	sessionKeyExpiration time.Time
 	cancel               chan bool
 	mux                  sync.RWMutex
+	flags                asn1.BitString
+	cAddr                []types.HostAddress
 }
 
 // jsonSession is used to enable marshaling some information of a session in a JSON format
@@ -98,10 +101,13 @@ func (cl *Client) addSession(tgt messages.Ticket, dep messages.EncKDCRepPart) {
 		tgt:                  tgt,
 		sessionKey:           dep.Key,
 		sessionKeyExpiration: dep.KeyExpiration,
+		flags:                dep.Flags,
+		cAddr:                dep.CAddr,
 	}
 	cl.sessions.update(s)
 	cl.enableAutoSessionRenewal(s)
 	cl.Log("TGT session added for %s (EndTime: %v)", realm, dep.EndTime)
+
 }
 
 // update overwrites the session details with those from the TGT and decrypted encPart
@@ -144,6 +150,19 @@ func (s *session) tgtDetails() (string, messages.Ticket, types.EncryptionKey) {
 	s.mux.RLock()
 	defer s.mux.RUnlock()
 	return s.realm, s.tgt, s.sessionKey
+}
+
+func (s *session) tgtDetailsExt() (flags asn1.BitString, cAddr []types.HostAddress) {
+	s.mux.RLock()
+	defer s.mux.RUnlock()
+	flags.BitLength = s.flags.BitLength
+	flags.Bytes = make([]byte, len(s.flags.Bytes))
+	copy(flags.Bytes, s.flags.Bytes)
+	for _, item := range s.cAddr {
+		// item will be a copy of the value and not a reference
+		cAddr = append(cAddr, item)
+	}
+	return
 }
 
 // timeDetails is a thread safe way to get the session's validity time values
@@ -280,6 +299,16 @@ func (cl *Client) sessionTGT(realm string) (tgt messages.Ticket, sessionKey type
 	return
 }
 
+func (cl *Client) sessionTGTDetails(realm string) (flags asn1.BitString, cAddr []types.HostAddress, err error) {
+	s, ok := cl.sessions.get(realm)
+	if !ok {
+		err = fmt.Errorf("could not find TGT session for %s", realm)
+		return
+	}
+	flags, cAddr = s.tgtDetailsExt()
+	return
+}
+
 // sessionTimes provides the timing information with regards to a session for the realm specified.
 func (cl *Client) sessionTimes(realm string) (authTime, endTime, renewTime, sessionExp time.Time, err error) {
 	s, ok := cl.sessions.get(realm)
@@ -294,4 +323,12 @@ func (cl *Client) sessionTimes(realm string) (authTime, endTime, renewTime, sess
 // spnRealm resolves the realm name of a service principal name
 func (cl *Client) spnRealm(spn types.PrincipalName) string {
 	return cl.Config.ResolveRealm(spn.NameString[len(spn.NameString)-1])
+}
+
+func (cl *Client) sessionRealms() (realms []string) {
+	realms = make([]string, 0, len(cl.sessions.Entries))
+	for k := range cl.sessions.Entries {
+		realms = append(realms, k)
+	}
+	return
 }
