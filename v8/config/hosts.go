@@ -1,7 +1,9 @@
 package config
 
 import (
+	"context"
 	"fmt"
+	"golang.org/x/net/proxy"
 	"math/rand"
 	"net"
 	"strconv"
@@ -9,6 +11,40 @@ import (
 
 	"github.com/jcmturner/dnsutils/v2"
 )
+
+func (c *Config) SetDNSResolver(dialer proxy.ContextDialer, addr, protocol string) (err error) {
+	if dialer == nil {
+		err = fmt.Errorf("dialer cannot be empty!")
+		return
+	}
+	parts := strings.Split(addr, ":")
+	if len(parts) < 2 {
+		fmt.Println("Invalid addr. Format is ip:port")
+		return
+	}
+	ip := net.ParseIP(parts[0])
+	if ip == nil {
+		fmt.Println("Not a valid ip host address")
+		return
+	}
+	p, err := strconv.ParseUint(parts[1], 10, 32)
+	if err != nil {
+		fmt.Printf("Invalid addr. Failed to parse port: %s\n", err)
+		return
+	}
+	if p < 1 {
+		fmt.Println("Invalid port number")
+		return
+	}
+
+	net.DefaultResolver = &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			return dialer.DialContext(ctx, protocol, addr)
+		},
+	}
+	return nil
+}
 
 // GetKDCs returns the count of KDCs available and a map of KDC host names keyed on preference order.
 func (c *Config) GetKDCs(realm string, tcp bool) (int, map[int]string, error) {
