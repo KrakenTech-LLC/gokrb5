@@ -1,11 +1,13 @@
 package client
 
 import (
+	"fmt"
 	"github.com/KrakenTech-LLC/gokrb5/v8/iana/flags"
 	"github.com/KrakenTech-LLC/gokrb5/v8/iana/nametype"
 	"github.com/KrakenTech-LLC/gokrb5/v8/krberror"
 	"github.com/KrakenTech-LLC/gokrb5/v8/messages"
 	"github.com/KrakenTech-LLC/gokrb5/v8/types"
+	"strings"
 )
 
 // TGSREQGenerateAndExchange generates the TGS_REQ and performs a TGS exchange to retrieve a ticket to the specified SPN.
@@ -73,6 +75,7 @@ func (cl *Client) TGSExchange(tgsReq messages.TGSReq, kdcRealm string, tgt messa
 		tgsRep.DecryptedEncPart.EndTime,
 		tgsRep.DecryptedEncPart.RenewTill,
 		tgsRep.DecryptedEncPart.Key,
+		tgsRep.DecryptedEncPart.Flags,
 	)
 	cl.Log("ticket added to cache for %s (EndTime: %v)", tgsRep.Ticket.SName.PrincipalNameString(), tgsRep.DecryptedEncPart.EndTime)
 	return tgsReq, tgsRep, err
@@ -82,14 +85,49 @@ func (cl *Client) TGSExchange(tgsReq messages.TGSReq, kdcRealm string, tgt messa
 // SPN format: <SERVICE>/<FQDN> Eg. HTTP/www.example.com
 // The ticket will be added to the client's ticket cache
 func (cl *Client) GetServiceTicket(spn string) (messages.Ticket, types.EncryptionKey, error) {
+	return cl.GetServiceTicketExt(spn, "")
+}
+
+// GetServiceTicket makes a request to get a service ticket for the SPN specified
+// SPN format: <SERVICE>/<FQDN> Eg. HTTP/www.example.com
+// The ticket will be added to the client's ticket cache
+
+func (cl *Client) GetServiceTicketExt(spn, dcDomain string) (messages.Ticket, types.EncryptionKey, error) {
 	var tkt messages.Ticket
 	var skey types.EncryptionKey
 	if tkt, skey, ok := cl.GetCachedTicket(spn); ok {
 		// Already a valid ticket in the cache
 		return tkt, skey, nil
 	}
-	princ := types.NewPrincipalName(nametype.KRB_NT_PRINCIPAL, spn)
-	realm := cl.spnRealm(princ)
+	parts := strings.Split(spn, "/")
+	// Should perhaps support SPNs of the format <service class>/<host>:<port>/<service name>
+	if len(parts) != 2 {
+		return messages.Ticket{}, types.EncryptionKey{}, fmt.Errorf("Invalid SPN")
+	}
+	// Check if cross realm
+	var realm string
+	if strings.ToLower(parts[0]) == "krbtgt" {
+		realm = strings.ToUpper(parts[1])
+	} else if strings.Contains(parts[1], ".") {
+		// Strip away host name if it is a FQDN
+		parts = strings.SplitN(parts[1], ".", 2)
+		realm = strings.ToUpper(parts[1])
+	}
+	// Handle a more advanced scenario where a referral ticket is required for communication
+	// with another kerberos realm/domain
+	if dcDomain != "" && !strings.EqualFold(cl.Credentials.Realm(), dcDomain) {
+		// If client realm is not same as DC Realm we should look for a referral ticket and not for a TGT
+		realm = dcDomain
+	}
+
+	spnNameType := nametype.KRB_NT_PRINCIPAL
+	if strings.Contains(spn, "/") {
+		spnNameType = nametype.KRB_NT_SRV_INST
+	}
+	princ := types.NewPrincipalName(spnNameType, spn)
+	if realm == "" {
+		realm = cl.spnRealm(princ)
+	}
 
 	// if we don't know the SPN's realm, ask the client realm's KDC
 	if realm == "" {
@@ -99,6 +137,10 @@ func (cl *Client) GetServiceTicket(spn string) (messages.Ticket, types.Encryptio
 	tgt, skey, err := cl.sessionTGT(realm)
 	if err != nil {
 		return tkt, skey, err
+	}
+	if tgt.SName.Equal(princ) {
+		// Found our ticket already!
+		return tgt, skey, nil
 	}
 	_, tgsRep, err := cl.TGSREQGenerateAndExchange(princ, realm, tgt, skey, false)
 	if err != nil {
