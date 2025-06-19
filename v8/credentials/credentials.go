@@ -27,7 +27,9 @@ type Credentials struct {
 	realm           string
 	cname           types.PrincipalName
 	keytab          *keytab.Keytab
+	nthash          []byte
 	password        string
+	aeskey          []byte
 	attributes      map[string]interface{}
 	validUntil      time.Time
 	authenticated   bool
@@ -45,6 +47,8 @@ type marshalCredentials struct {
 	Realm           string
 	CName           types.PrincipalName `json:"-"`
 	Keytab          bool
+	NTHash          bool
+	AESKey          bool
 	Password        bool
 	Attributes      map[string]interface{} `json:"-"`
 	ValidUntil      time.Time
@@ -131,6 +135,46 @@ func (c *Credentials) Password() string {
 // HasPassword queries if the Credentials has a password defined.
 func (c *Credentials) HasPassword() bool {
 	if c.password != "" {
+		return true
+	}
+	return false
+}
+
+// WithNTHash sets the nthash in the Credentials struct.
+func (c *Credentials) WithNTHash(hash []byte) *Credentials {
+	c.nthash = hash
+	c.keytab = keytab.New() // clear any keytab
+	return c
+}
+
+// NTHash returns the credential's nthash.
+func (c *Credentials) NTHash() []byte {
+	return c.nthash
+}
+
+// HasNTHash queries if the Credentials has a NT Hash defined.
+func (c *Credentials) HasNTHash() bool {
+	if c.nthash != nil {
+		return true
+	}
+	return false
+}
+
+// WithAESKey sets the aeskey in the Credentials struct.
+func (c *Credentials) WithAESKey(key []byte) *Credentials {
+	c.aeskey = key
+	c.keytab = keytab.New() // clear any keytab
+	return c
+}
+
+// AESKey returns the credential's aeskey.
+func (c *Credentials) AESKey() []byte {
+	return c.aeskey
+}
+
+// HasAESKey queries if the Credentials has an AES Key defined.
+func (c *Credentials) HasAESKey() bool {
+	if c.aeskey != nil {
 		return true
 	}
 	return false
@@ -342,6 +386,8 @@ func (c *Credentials) Marshal() ([]byte, error) {
 		CName:           c.cname,
 		Keytab:          c.HasKeytab(),
 		Password:        c.HasPassword(),
+		NTHash:          c.HasNTHash(),
+		AESKey:          c.HasAESKey(),
 		Attributes:      c.attributes,
 		ValidUntil:      c.validUntil,
 		Authenticated:   c.authenticated,
@@ -391,6 +437,8 @@ func (c *Credentials) JSON() (string, error) {
 		CName:         c.cname,
 		Keytab:        c.HasKeytab(),
 		Password:      c.HasPassword(),
+		NTHash:        c.HasNTHash(),
+		AESKey:        c.HasAESKey(),
 		ValidUntil:    c.validUntil,
 		Authenticated: c.authenticated,
 		Human:         c.human,
