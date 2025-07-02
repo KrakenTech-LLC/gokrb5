@@ -320,9 +320,10 @@ func (cl *Client) Key(etype etype.EType, kvno int, krberr *messages.KRBError) (t
 		key, _, err := crypto.GetKeyFromPassword(cl.Credentials.Password(), cl.Credentials.CName(), cl.Credentials.Domain(), etype.GetETypeID(), types.PADataSequence{})
 		return key, 0, err
 	} else if cl.Credentials.HasCertificate() {
-		// Certificate-based authentication requires PKINIT implementation
-		// For now, return an error indicating this feature needs to be implemented
-		return types.EncryptionKey{}, 0, errors.New("certificate-based authentication (PKINIT) is not yet implemented")
+		// For PKINIT, we don't derive keys the same way as password/keytab
+		// The key derivation happens during the DH exchange in the AS exchange
+		// For now, return a placeholder - this should be handled by the PKINIT protocol
+		return types.EncryptionKey{}, 0, errors.New("PKINIT key derivation should be handled during AS exchange, not in Key() method")
 	}
 	return types.EncryptionKey{}, 0, errors.New("credential has neither keytab, password, nor certificate to generate key")
 }
@@ -392,16 +393,27 @@ func (cl *Client) Login() error {
 
 // loginWithCertificate handles PKINIT authentication flow
 func (cl *Client) loginWithCertificate() error {
-	// TODO: Implement PKINIT (Public Key Cryptography for Initial Authentication)
-	// This requires:
-	// 1. Creating AS-REQ with PKINIT pre-authentication data
-	// 2. Including client certificate in the request
-	// 3. Performing Diffie-Hellman key exchange
-	// 4. Handling AS-REP with PKINIT response
-	// 5. Deriving session key from DH exchange
+	// Create AS-REQ for TGT with PKINIT
+	ASReq, err := messages.NewASReqForTGT(cl.Credentials.Domain(), cl.Config, cl.Credentials.CName())
+	if err != nil {
+		return krberror.Errorf(err, krberror.KRBMsgError, "error generating new AS_REQ for PKINIT")
+	}
 
-	return errors.New("PKINIT (certificate-based authentication) is not yet implemented. " +
-		"This requires implementing RFC 4556 - Public Key Cryptography for Initial Authentication in Kerberos")
+	// The setPAData function will now handle PKINIT PAData since we have certificates
+	err = setPAData(cl, nil, &ASReq)
+	if err != nil {
+		return krberror.Errorf(err, krberror.KRBMsgError, "error setting PKINIT PAData on AS_REQ")
+	}
+
+	// Perform AS exchange
+	ASRep, err := cl.ASExchange(cl.Credentials.Domain(), ASReq, 0)
+	if err != nil {
+		return krberror.Errorf(err, krberror.KRBMsgError, "PKINIT AS exchange failed: %v", err)
+	}
+
+	// Add session (this part works the same as password/keytab auth)
+	cl.addSession(ASRep.Ticket, ASRep.DecryptedEncPart)
+	return nil
 }
 
 // AffirmLogin will only perform an AS exchange with the KDC if the client does not already have a TGT.

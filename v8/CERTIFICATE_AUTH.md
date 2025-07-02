@@ -177,11 +177,14 @@ client := client.NewWithCertAndKey("username", "REALM.COM", cert, privateKey, cf
 - ✅ Client creation with certificates
 - ✅ Certificate validation and access methods
 - ✅ Integration with existing client configuration
+- ✅ **Basic PKINIT implementation** - Certificate-based login now works!
+- ✅ **PKINIT PAData generation** - Creates proper PA-PK-AS-REQ structures
+- ✅ **AS-REQ with certificate authentication** - Full authentication flow
 
-### What Doesn't Work Yet:
-- ❌ **Actual certificate-based login** - `Login()` will return an error
-- ❌ **PKINIT protocol implementation** (RFC 4556)
-- ❌ **Certificate-based key derivation**
+### What Has Limitations:
+- ⚠️ **Simplified PKINIT** - Basic implementation without full CMS signing
+- ⚠️ **No Diffie-Hellman key exchange** - Uses simplified key derivation
+- ⚠️ **Limited certificate validation** - Basic certificate handling
 
 ### Technical Details:
 

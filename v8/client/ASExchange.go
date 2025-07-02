@@ -1,6 +1,7 @@
 package client
 
 import (
+	"crypto/rand"
 	"github.com/KrakenTech-LLC/gokrb5/v8/crypto"
 	"github.com/KrakenTech-LLC/gokrb5/v8/crypto/etype"
 	"github.com/KrakenTech-LLC/gokrb5/v8/iana/errorcode"
@@ -8,7 +9,9 @@ import (
 	"github.com/KrakenTech-LLC/gokrb5/v8/iana/patype"
 	"github.com/KrakenTech-LLC/gokrb5/v8/krberror"
 	"github.com/KrakenTech-LLC/gokrb5/v8/messages"
+	"github.com/KrakenTech-LLC/gokrb5/v8/pki"
 	"github.com/KrakenTech-LLC/gokrb5/v8/types"
+	"math/big"
 )
 
 // ASExchange performs an AS exchange for the client to retrieve a TGT.
@@ -81,6 +84,12 @@ func setPAData(cl *Client, krberr *messages.KRBError, ASReq *messages.ASReq) err
 		pa := types.PAData{PADataType: patype.PA_REQ_ENC_PA_REP}
 		ASReq.PAData = append(ASReq.PAData, pa)
 	}
+
+	// Handle certificate-based authentication (PKINIT)
+	if cl.Credentials.HasCertificate() {
+		return setPKINITPAData(cl, ASReq)
+	}
+
 	if cl.settings.AssumePreAuthentication() {
 		// Identify the etype to use to encrypt the PA Data
 		var et etype.EType
@@ -179,4 +188,32 @@ Loop:
 		return
 	}
 	return etype, nil
+}
+
+// setPKINITPAData adds PKINIT pre-authentication data to the AS_REQ
+func setPKINITPAData(cl *Client, ASReq *messages.ASReq) error {
+	cert := cl.Credentials.Certificate()
+	privateKey := cl.Credentials.PrivateKey()
+
+	if cert == nil || privateKey == nil {
+		return krberror.New(krberror.KRBMsgError, "certificate or private key not available for PKINIT")
+	}
+
+	// Generate random nonce for this request
+	nonceBig, err := rand.Int(rand.Reader, big.NewInt(2147483647)) // Max int32
+	if err != nil {
+		return krberror.Errorf(err, krberror.KRBMsgError, "error generating nonce for PKINIT")
+	}
+	nonce := int32(nonceBig.Int64())
+
+	// Create PKINIT PAData
+	pkInitPAData, err := pki.CreatePKINITPAData(cert, privateKey, nonce)
+	if err != nil {
+		return krberror.Errorf(err, krberror.KRBMsgError, "error creating PKINIT PAData: %v", err)
+	}
+
+	// Add to AS_REQ
+	ASReq.PAData = append(ASReq.PAData, *pkInitPAData)
+
+	return nil
 }
