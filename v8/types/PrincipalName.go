@@ -11,8 +11,8 @@ import (
 
 // PrincipalName implements RFC 4120 type: https://tools.ietf.org/html/rfc4120#section-5.2.2
 type PrincipalName struct {
-	NameType   int32    `asn1:"explicit,tag:0"`
-	NameString []string `asn1:"generalstring,explicit,tag:1"`
+	NameType   int32    `asn1:"explicit,tag:0" json:"name_type"`
+	NameString []string `asn1:"generalstring,explicit,tag:1" json:"name_string"`
 }
 
 // NewPrincipalName creates a new PrincipalName from the name type int32 and name string provided.

@@ -1,6 +1,8 @@
 package messages
 
 import (
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -25,32 +27,87 @@ import (
 
 // Ticket implements the Kerberos ticket.
 type Ticket struct {
-	TktVNO           int                 `asn1:"explicit,tag:0"`
-	Realm            string              `asn1:"generalstring,explicit,tag:1"`
-	SName            types.PrincipalName `asn1:"explicit,tag:2"`
-	EncPart          types.EncryptedData `asn1:"explicit,tag:3"`
-	DecryptedEncPart EncTicketPart       `asn1:"optional"` // Not part of ASN1 bytes so marked as optional so unmarshalling works
+	TktVNO           int                 `asn1:"explicit,tag:0" json:"tkt_vno"`
+	Realm            string              `asn1:"generalstring,explicit,tag:1" json:"realm"`
+	SName            types.PrincipalName `asn1:"explicit,tag:2" json:"sname"`
+	EncPart          types.EncryptedData `asn1:"explicit,tag:3" json:"enc_part"`
+	DecryptedEncPart EncTicketPart       `asn1:"optional" json:"decrypted_enc_part"` // Not part of ASN1 bytes so marked as optional so unmarshalling works
 }
 
 // EncTicketPart is the encrypted part of the Ticket.
 type EncTicketPart struct {
-	Flags             asn1.BitString          `asn1:"explicit,tag:0"`
-	Key               types.EncryptionKey     `asn1:"explicit,tag:1"`
-	CRealm            string                  `asn1:"generalstring,explicit,tag:2"`
-	CName             types.PrincipalName     `asn1:"explicit,tag:3"`
-	Transited         TransitedEncoding       `asn1:"explicit,tag:4"`
-	AuthTime          time.Time               `asn1:"generalized,explicit,tag:5"`
-	StartTime         time.Time               `asn1:"generalized,explicit,optional,tag:6"`
-	EndTime           time.Time               `asn1:"generalized,explicit,tag:7"`
-	RenewTill         time.Time               `asn1:"generalized,explicit,optional,tag:8"`
-	CAddr             types.HostAddresses     `asn1:"explicit,optional,tag:9"`
-	AuthorizationData types.AuthorizationData `asn1:"explicit,optional,tag:10"`
+	Flags             asn1.BitString          `asn1:"explicit,tag:0" json:"flags"`
+	Key               types.EncryptionKey     `asn1:"explicit,tag:1" json:"key"`
+	CRealm            string                  `asn1:"generalstring,explicit,tag:2" json:"crealm"`
+	CName             types.PrincipalName     `asn1:"explicit,tag:3" json:"cname"`
+	Transited         TransitedEncoding       `asn1:"explicit,tag:4" json:"transited"`
+	AuthTime          time.Time               `asn1:"generalized,explicit,tag:5" json:"auth_time"`
+	StartTime         time.Time               `asn1:"generalized,explicit,optional,tag:6" json:"start_time"`
+	EndTime           time.Time               `asn1:"generalized,explicit,tag:7" json:"end_time"`
+	RenewTill         time.Time               `asn1:"generalized,explicit,optional,tag:8" json:"renew_till"`
+	CAddr             types.HostAddresses     `asn1:"explicit,optional,tag:9" json:"caddr"`
+	AuthorizationData types.AuthorizationData `asn1:"explicit,optional,tag:10" json:"authorization_data"`
+}
+
+func (e EncTicketPart) MarshalJSON() ([]byte, error) {
+	type Alias EncTicketPart
+
+	return json.Marshal(&struct {
+		Flags struct {
+			Bytes     string `json:"bytes"`      // hex string
+			BitLength int    `json:"bit_length"` // actual length in bits
+		} `json:"flags"`
+		Alias
+	}{
+		Flags: struct {
+			Bytes     string `json:"bytes"`
+			BitLength int    `json:"bit_length"`
+		}{
+			Bytes:     hex.EncodeToString(e.Flags.Bytes),
+			BitLength: e.Flags.BitLength,
+		},
+		Alias: (Alias)(e),
+	})
+}
+
+func (e *EncTicketPart) UnmarshalJSON(data []byte) error {
+	type Alias EncTicketPart
+
+	aux := &struct {
+		Flags struct {
+			Bytes     string `json:"bytes"`
+			BitLength int    `json:"bit_length"`
+		} `json:"flags"`
+		*Alias
+	}{
+		Alias: (*Alias)(e),
+	}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	bytes, err := hex.DecodeString(aux.Flags.Bytes)
+	if err != nil {
+		return err
+	}
+
+	e.Flags = asn1.BitString{
+		Bytes:     bytes,
+		BitLength: aux.Flags.BitLength,
+	}
+
+	return nil
+}
+
+func formatBitString(b asn1.BitString) string {
+	return hex.EncodeToString(b.Bytes)
 }
 
 // TransitedEncoding part of the ticket's encrypted part.
 type TransitedEncoding struct {
-	TRType   int32  `asn1:"explicit,tag:0"`
-	Contents []byte `asn1:"explicit,tag:1"`
+	TRType   int32  `asn1:"explicit,tag:0" json:"trtype"`
+	Contents []byte `asn1:"explicit,tag:1" json:"contents"`
 }
 
 // NewTicket creates a new Ticket instance.

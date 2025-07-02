@@ -17,8 +17,8 @@ type HostAddresses []HostAddress
 
 // HostAddress implements RFC 4120 type: https://tools.ietf.org/html/rfc4120#section-5.2.5
 type HostAddress struct {
-	AddrType int32  `asn1:"explicit,tag:0"`
-	Address  []byte `asn1:"explicit,tag:1"`
+	AddrType int32  `asn1:"explicit,tag:0" json:"addr_type"`
+	Address  []byte `asn1:"explicit,tag:1" json:"address"`
 }
 
 // GetHostAddress returns a HostAddress struct from a string in the format <hostname>:<port>

@@ -12,22 +12,22 @@ import (
 
 // EncryptedData implements RFC 4120 type: https://tools.ietf.org/html/rfc4120#section-5.2.9
 type EncryptedData struct {
-	EType  int32  `asn1:"explicit,tag:0"`
-	KVNO   int    `asn1:"explicit,optional,tag:1"`
-	Cipher []byte `asn1:"explicit,tag:2"`
+	EType  int32  `asn1:"explicit,tag:0" json:"etype"`
+	KVNO   int    `asn1:"explicit,optional,tag:1" json:"kvno"`
+	Cipher []byte `asn1:"explicit,tag:2" json:"cipher"`
 }
 
 // EncryptionKey implements RFC 4120 type: https://tools.ietf.org/html/rfc4120#section-5.2.9
 // AKA KeyBlock
 type EncryptionKey struct {
-	KeyType  int32  `asn1:"explicit,tag:0"`
-	KeyValue []byte `asn1:"explicit,tag:1" json:"-"`
+	KeyType  int32  `asn1:"explicit,tag:0" json:"key_type"`
+	KeyValue []byte `asn1:"explicit,tag:1" json:"key_value"`
 }
 
 // Checksum implements RFC 4120 type: https://tools.ietf.org/html/rfc4120#section-5.2.9
 type Checksum struct {
-	CksumType int32  `asn1:"explicit,tag:0"`
-	Checksum  []byte `asn1:"explicit,tag:1"`
+	CksumType int32  `asn1:"explicit,tag:0" json:"cksum_type"`
+	Checksum  []byte `asn1:"explicit,tag:1" json:"checksum"`
 }
 
 // Unmarshal bytes into the EncryptedData.
