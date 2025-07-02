@@ -1,36 +1,62 @@
 package main
 
 import (
-	"bufio"
 	"encoding/base64"
 	"fmt"
 	"github.com/KrakenTech-LLC/gokrb5/v8/client"
 	"github.com/KrakenTech-LLC/gokrb5/v8/config"
 	"github.com/KrakenTech-LLC/gokrb5/v8/credentials"
-	"golang.org/x/term"
 	"log"
 	"os"
+	"software.sslmate.com/src/go-pkcs12"
 	"strings"
-	"syscall"
 	"time"
 )
 
 func main() {
-	fmt.Println("=== PKINIT Authentication Test ===")
-	fmt.Println("This program tests certificate-based Kerberos authentication")
-	fmt.Println()
 
-	// Get user inputs
-	pfxPath := promptForInput("Enter PFX file path: ")
-	pfxPassword := promptForPassword("Enter PFX password (press Enter if none): ")
-	username := promptForInput("Enter username: ")
-	realm := promptForInput("Enter Kerberos realm (e.g., EXAMPLE.COM): ")
-	kdc := promptForInput("Enter KDC address (e.g., kdc.example.com:88): ")
+	var (
+		pfxPath     string
+		pfxPassword string
+		realm       string
+		kdc         string
+	)
+
+	if len(os.Args[1:]) < 3 {
+		fmt.Println("Usage: pkinit <pfx_file_path> <pfx_password> <realm> <kdc>")
+		return
+	} else if len(os.Args[1:]) == 4 {
+		pfxPath = os.Args[1]
+		pfxPassword = os.Args[2]
+		realm = os.Args[3]
+		kdc = os.Args[4]
+	} else if len(os.Args[1:]) == 3 {
+		pfxPath = os.Args[1]
+		realm = os.Args[2]
+		kdc = os.Args[3]
+	} else {
+		fmt.Println("Usage: pkinit <pfx_file_path> <pfx_password> <realm> <kdc>")
+		return
+	}
+
+	if len(os.Args[1:]) == 4 {
+		pfxPath = os.Args[1]
+		pfxPassword = os.Args[2]
+		realm = os.Args[3]
+		kdc = os.Args[4]
+	} else if len(os.Args[1:]) == 3 {
+		pfxPath = os.Args[1]
+		realm = os.Args[2]
+		kdc = os.Args[3]
+	}
+
+	fmt.Println("=== PKINIT Authentication Test ===")
+	fmt.Println("Test certificate-based Kerberos authentication")
+	fmt.Println()
 
 	fmt.Println()
 	fmt.Println("=== Configuration ===")
 	fmt.Printf("PFX File: %s\n", pfxPath)
-	fmt.Printf("Username: %s\n", username)
 	fmt.Printf("Realm: %s\n", realm)
 	fmt.Printf("KDC: %s\n", kdc)
 	fmt.Println()
@@ -42,6 +68,14 @@ func main() {
 		log.Fatalf("Failed to read PFX file: %v", err)
 	}
 	fmt.Printf("✅ Successfully loaded PFX file (%d bytes)\n", len(pfxData))
+
+	// Extract certificate to get username
+	fmt.Println("\n=== Extracting Certificate Information ===")
+	username, err := extractUsernameFromPFX(pfxData, pfxPassword)
+	if err != nil {
+		log.Fatalf("Failed to extract username from certificate: %v", err)
+	}
+	fmt.Printf("✅ Extracted username from certificate: %s\n", username)
 
 	// Create Kerberos configuration
 	fmt.Println("\n=== Creating Kerberos Configuration ===")
@@ -109,21 +143,68 @@ func main() {
 	fmt.Println("PKINIT authentication test completed successfully!")
 }
 
-func promptForInput(prompt string) string {
-	fmt.Print(prompt)
-	reader := bufio.NewReader(os.Stdin)
-	input, _ := reader.ReadString('\n')
-	return strings.TrimSpace(input)
-}
-
-func promptForPassword(prompt string) string {
-	fmt.Print(prompt)
-	password, err := term.ReadPassword(int(syscall.Stdin))
+// extractUsernameFromPFX extracts the Kerberos principal name from a PFX certificate
+func extractUsernameFromPFX(pfxData []byte, password string) (string, error) {
+	// Decode the PFX to get the certificate
+	_, cert, _, err := pkcs12.DecodeChain(pfxData, password)
 	if err != nil {
-		log.Fatalf("Failed to read password: %v", err)
+		return "", fmt.Errorf("failed to decode PFX: %v", err)
 	}
-	fmt.Println() // New line after password input
-	return string(password)
+
+	if cert == nil {
+		return "", fmt.Errorf("no certificate found in PFX")
+	}
+
+	// Try to extract username from Subject Alternative Names (SAN)
+	for _, name := range cert.DNSNames {
+		// Look for Kerberos principal format: user@REALM
+		if strings.Contains(name, "@") {
+			parts := strings.Split(name, "@")
+			if len(parts) == 2 {
+				fmt.Printf("   Found Kerberos principal in SAN DNS: %s\n", name)
+				return parts[0], nil // Return just the username part
+			}
+		}
+	}
+
+	// Try to extract from Subject Alternative Names (other names)
+	for _, email := range cert.EmailAddresses {
+		if strings.Contains(email, "@") {
+			parts := strings.Split(email, "@")
+			if len(parts) == 2 {
+				fmt.Printf("   Found potential principal in SAN email: %s\n", email)
+				return parts[0], nil
+			}
+		}
+	}
+
+	// Try to extract from Subject DN Common Name
+	if cert.Subject.CommonName != "" {
+		cn := cert.Subject.CommonName
+		fmt.Printf("   Found Common Name: %s\n", cn)
+
+		// If CN contains @, split it
+		if strings.Contains(cn, "@") {
+			parts := strings.Split(cn, "@")
+			if len(parts) == 2 {
+				fmt.Printf("   Extracted username from CN: %s\n", parts[0])
+				return parts[0], nil
+			}
+		}
+
+		// Otherwise use the whole CN as username
+		fmt.Printf("   Using full CN as username: %s\n", cn)
+		return cn, nil
+	}
+
+	// If all else fails, try the first part of the first organizational unit
+	if len(cert.Subject.OrganizationalUnit) > 0 {
+		ou := cert.Subject.OrganizationalUnit[0]
+		fmt.Printf("   Using first OU as username: %s\n", ou)
+		return ou, nil
+	}
+
+	return "", fmt.Errorf("could not extract username from certificate - no suitable field found")
 }
 
 func createKerberosConfig(realm, kdc string) *config.Config {
