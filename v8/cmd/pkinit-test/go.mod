@@ -3,7 +3,7 @@ module pkinit-test
 go 1.19
 
 require (
-	github.com/KrakenTech-LLC/gokrb5/v8 v8.0.0
+	github.com/KrakenTech-LLC/gokrb5/v8 v8.0.0-20250702193815-20aade76b2c8
 	software.sslmate.com/src/go-pkcs12 v0.5.0
 )
 
