@@ -194,6 +194,7 @@ Loop:
 func setPKINITPAData(cl *Client, ASReq *messages.ASReq) error {
 	cert := cl.Credentials.Certificate()
 	privateKey := cl.Credentials.PrivateKey()
+	caCerts := cl.Credentials.CACerts()
 
 	if cert == nil || privateKey == nil {
 		return krberror.New(krberror.KRBMsgError, "certificate or private key not available for PKINIT")
@@ -206,8 +207,8 @@ func setPKINITPAData(cl *Client, ASReq *messages.ASReq) error {
 	}
 	nonce := int32(nonceBig.Int64())
 
-	// Create PKINIT PAData
-	pkInitPAData, err := pki.CreatePKINITPAData(cert, privateKey, nonce)
+	// Create PKINIT PAData with CA certificates
+	pkInitPAData, err := pki.CreatePKINITPAData(cert, privateKey, nonce, caCerts)
 	if err != nil {
 		return krberror.Errorf(err, krberror.KRBMsgError, "error creating PKINIT PAData: %v", err)
 	}

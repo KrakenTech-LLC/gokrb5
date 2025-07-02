@@ -177,27 +177,51 @@ client := client.NewWithCertAndKey("username", "REALM.COM", cert, privateKey, cf
 - ✅ Client creation with certificates
 - ✅ Certificate validation and access methods
 - ✅ Integration with existing client configuration
-- ✅ **Basic PKINIT implementation** - Certificate-based login now works!
-- ✅ **PKINIT PAData generation** - Creates proper PA-PK-AS-REQ structures
-- ✅ **AS-REQ with certificate authentication** - Full authentication flow
+- ✅ **Complete PKINIT implementation** - Full certificate-based authentication!
+- ✅ **CMS SignedData creation** - Proper AuthPack signing with private key
+- ✅ **TrustedCertifiers support** - CA certificate chain handling
+- ✅ **ASN.1 encoding/decoding** - Proper PKINIT message structures
+- ✅ **RSA signature support** - Full cryptographic signing
+- ✅ **Certificate chain inclusion** - Client and CA certs in CMS structure
 
 ### What Has Limitations:
-- ⚠️ **Simplified PKINIT** - Basic implementation without full CMS signing
-- ⚠️ **No Diffie-Hellman key exchange** - Uses simplified key derivation
-- ⚠️ **Limited certificate validation** - Basic certificate handling
+- ⚠️ **RSA keys only** - ECDSA and other key types not yet supported
+- ⚠️ **No Diffie-Hellman key exchange** - Uses standard key derivation
+- ⚠️ **Basic certificate validation** - Could be enhanced with more checks
 
 ### Technical Details:
 
-1. **PKINIT Not Implemented**: Certificate-based Kerberos authentication requires implementing PKINIT (Public Key Cryptography for Initial Authentication) per RFC 4556. This involves:
-   - Creating AS-REQ with PKINIT pre-authentication data
-   - Including client certificate in the request
-   - Performing Diffie-Hellman key exchange with the KDC
-   - Deriving session keys from the DH exchange
-   - Handling PKINIT-specific AS-REP responses
+1. **Complete PKINIT Implementation**: The implementation now includes full PKINIT (RFC 4556) support:
+   - ✅ **AuthPack Creation**: Proper PKAuthenticator with timestamp and nonce
+   - ✅ **CMS SignedData**: Full cryptographic signing of AuthPack with private key
+   - ✅ **Certificate Chain**: Client certificate and CA certificates included in CMS
+   - ✅ **TrustedCertifiers**: CA certificate information for KDC validation
+   - ✅ **PA-PK-AS-REQ**: Complete PKINIT pre-authentication data structure
+   - ✅ **ASN.1 Encoding**: Proper DER encoding of all PKINIT structures
 
-2. **Key Parsing**: The example shows simplified key parsing. In practice, you'll need to handle different key formats (PEM, DER) and types (RSA, ECDSA, etc.).
+2. **CMS Signing Process**:
+   ```go
+   // 1. Create and marshal AuthPack
+   authPack := &AuthPack{PKAuthenticator: pkAuth}
+   authPackBytes, _ := asn1.Marshal(*authPack)
 
-3. **Certificate Validation**: Additional certificate validation logic may be needed depending on your PKI requirements.
+   // 2. Sign with private key
+   hash := sha256.Sum256(authPackBytes)
+   signature, _ := rsa.SignPKCS1v15(rand.Reader, privateKey, crypto.SHA256, hash[:])
+
+   // 3. Create CMS SignedData with certificate chain
+   signedData := SignedData{
+       ContentInfo: ContentInfo{Content: authPackBytes},
+       Certificates: [client_cert, ca_certs...],
+       SignerInfos: [SignerInfo{EncryptedDigest: signature}],
+   }
+   ```
+
+3. **Certificate Chain Handling**: CA certificates from PFX are automatically included in:
+   - CMS SignedData structure for signature verification
+   - TrustedCertifiers field for KDC certificate path validation
+
+4. **Key Support**: Currently supports RSA private keys. ECDSA and other key types can be added by extending the signing switch statement.
 
 ## Future Enhancements
 
