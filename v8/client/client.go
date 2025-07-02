@@ -2,6 +2,7 @@
 package client
 
 import (
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -93,6 +94,56 @@ func NewWithKeytab(username, realm string, kt *keytab.Keytab, krb5conf *config.C
 	creds := credentials.New(username, realm)
 	return &Client{
 		Credentials: creds.WithKeytab(kt),
+		Config:      krb5conf,
+		settings:    NewSettings(settings...),
+		sessions: &sessions{
+			Entries: make(map[string]*session),
+		},
+		cache: NewCache(),
+	}
+}
+
+// NewWithPFX creates a new client from a PFX/PKCS12 file.
+// Set the realm to empty string to use the default realm from config.
+func NewWithPFX(username, realm string, pfxData []byte, pfxPassword string, krb5conf *config.Config, settings ...func(*Settings)) (*Client, error) {
+	creds := credentials.New(username, realm)
+	_, err := creds.WithPFX(pfxData, pfxPassword)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create client with PFX: %v", err)
+	}
+
+	return &Client{
+		Credentials: creds,
+		Config:      krb5conf,
+		settings:    NewSettings(settings...),
+		sessions: &sessions{
+			Entries: make(map[string]*session),
+		},
+		cache: NewCache(),
+	}, nil
+}
+
+// NewWithCertAndKey creates a new client from a certificate and private key.
+// Set the realm to empty string to use the default realm from config.
+func NewWithCertAndKey(username, realm string, cert *x509.Certificate, privateKey interface{}, krb5conf *config.Config, settings ...func(*Settings)) *Client {
+	creds := credentials.New(username, realm)
+	return &Client{
+		Credentials: creds.WithCertificate(cert, privateKey),
+		Config:      krb5conf,
+		settings:    NewSettings(settings...),
+		sessions: &sessions{
+			Entries: make(map[string]*session),
+		},
+		cache: NewCache(),
+	}
+}
+
+// NewWithCertChain creates a new client from a certificate, private key, and CA certificate chain.
+// Set the realm to empty string to use the default realm from config.
+func NewWithCertChain(username, realm string, cert *x509.Certificate, privateKey interface{}, caCerts []*x509.Certificate, krb5conf *config.Config, settings ...func(*Settings)) *Client {
+	creds := credentials.New(username, realm)
+	return &Client{
+		Credentials: creds.WithCertificateChain(cert, privateKey, caCerts),
 		Config:      krb5conf,
 		settings:    NewSettings(settings...),
 		sessions: &sessions{
@@ -268,8 +319,13 @@ func (cl *Client) Key(etype etype.EType, kvno int, krberr *messages.KRBError) (t
 		}
 		key, _, err := crypto.GetKeyFromPassword(cl.Credentials.Password(), cl.Credentials.CName(), cl.Credentials.Domain(), etype.GetETypeID(), types.PADataSequence{})
 		return key, 0, err
+	} else if cl.Credentials.HasCertificate() {
+		// For PKINIT, we don't derive keys the same way as password/keytab
+		// The key derivation happens during the DH exchange in the AS exchange
+		// For now, return a placeholder - this should be handled by the PKINIT protocol
+		return types.EncryptionKey{}, 0, errors.New("PKINIT key derivation should be handled during AS exchange, not in Key() method")
 	}
-	return types.EncryptionKey{}, 0, errors.New("credential has neither keytab or password to generate key")
+	return types.EncryptionKey{}, 0, errors.New("credential has neither keytab, password, nor certificate to generate key")
 }
 
 // IsConfigured indicates if the client has the values required set.
@@ -280,11 +336,11 @@ func (cl *Client) IsConfigured() (bool, error) {
 	if cl.Credentials.Domain() == "" {
 		return false, errors.New("client does not have a define realm")
 	}
-	// Client needs to have either a password, keytab or a session already (later when loading from CCache)
-	if !cl.Credentials.HasPassword() && !cl.Credentials.HasKeytab() {
+	// Client needs to have either a password, keytab, certificate, or a session already (later when loading from CCache)
+	if !cl.Credentials.HasPassword() && !cl.Credentials.HasKeytab() && !cl.Credentials.HasCertificate() {
 		authTime, _, _, _, err := cl.sessionTimes(cl.Credentials.Domain())
 		if err != nil || authTime.IsZero() {
-			return false, errors.New("client has neither a keytab nor a password set and no session")
+			return false, errors.New("client has neither a keytab, password, nor certificate set and no session")
 		}
 	}
 	if !cl.Config.LibDefaults.DNSLookupKDC {
@@ -305,7 +361,7 @@ func (cl *Client) Login() error {
 	if ok, err := cl.IsConfigured(); !ok {
 		return err
 	}
-	if !cl.Credentials.HasPassword() && !cl.Credentials.HasKeytab() {
+	if !cl.Credentials.HasPassword() && !cl.Credentials.HasKeytab() && !cl.Credentials.HasCertificate() {
 		_, endTime, _, _, err := cl.sessionTimes(cl.Credentials.Domain())
 		if err != nil {
 			return krberror.Errorf(err, krberror.KRBMsgError, "no user credentials available and error getting any existing session")
@@ -316,6 +372,13 @@ func (cl *Client) Login() error {
 		// no credentials but there is a session with tgt already
 		return nil
 	}
+
+	// Handle certificate-based authentication (PKINIT)
+	if cl.Credentials.HasCertificate() {
+		return cl.loginWithCertificate()
+	}
+
+	// Handle password/keytab authentication (standard AS exchange)
 	ASReq, err := messages.NewASReqForTGT(cl.Credentials.Domain(), cl.Config, cl.Credentials.CName())
 	if err != nil {
 		return krberror.Errorf(err, krberror.KRBMsgError, "error generating new AS_REQ")
@@ -324,6 +387,31 @@ func (cl *Client) Login() error {
 	if err != nil {
 		return err
 	}
+	cl.addSession(ASRep.Ticket, ASRep.DecryptedEncPart)
+	return nil
+}
+
+// loginWithCertificate handles PKINIT authentication flow
+func (cl *Client) loginWithCertificate() error {
+	// Create AS-REQ for TGT with PKINIT
+	ASReq, err := messages.NewASReqForTGT(cl.Credentials.Domain(), cl.Config, cl.Credentials.CName())
+	if err != nil {
+		return krberror.Errorf(err, krberror.KRBMsgError, "error generating new AS_REQ for PKINIT")
+	}
+
+	// The setPAData function will now handle PKINIT PAData since we have certificates
+	err = setPAData(cl, nil, &ASReq)
+	if err != nil {
+		return krberror.Errorf(err, krberror.KRBMsgError, "error setting PKINIT PAData on AS_REQ")
+	}
+
+	// Perform AS exchange
+	ASRep, err := cl.ASExchange(cl.Credentials.Domain(), ASReq, 0)
+	if err != nil {
+		return krberror.Errorf(err, krberror.KRBMsgError, "PKINIT AS exchange failed: %v", err)
+	}
+
+	// Add session (this part works the same as password/keytab auth)
 	cl.addSession(ASRep.Ticket, ASRep.DecryptedEncPart)
 	return nil
 }
