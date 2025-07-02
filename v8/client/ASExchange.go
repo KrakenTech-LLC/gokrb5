@@ -207,8 +207,14 @@ func setPKINITPAData(cl *Client, ASReq *messages.ASReq) error {
 	}
 	nonce := int32(nonceBig.Int64())
 
-	// Create PKINIT PAData with CA certificates
-	pkInitPAData, err := pki.CreatePKINITPAData(cert, privateKey, nonce, caCerts)
+	// Marshal AS-REQ body to calculate PAChecksum
+	asReqBodyBytes, err := ASReq.ReqBody.Marshal()
+	if err != nil {
+		return krberror.Errorf(err, krberror.EncodingError, "error marshaling AS-REQ body for PKINIT checksum")
+	}
+
+	// Create PKINIT PAData with proper PAChecksum
+	pkInitPAData, err := pki.CreatePKINITPADataWithChecksum(cert, privateKey, nonce, caCerts, asReqBodyBytes)
 	if err != nil {
 		return krberror.Errorf(err, krberror.KRBMsgError, "error creating PKINIT PAData: %v", err)
 	}

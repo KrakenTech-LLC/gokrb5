@@ -12,6 +12,7 @@ import (
 
 	"github.com/KrakenTech-LLC/gokrb5/v8/iana/nametype"
 	"github.com/KrakenTech-LLC/gokrb5/v8/keytab"
+	"github.com/KrakenTech-LLC/gokrb5/v8/pki"
 	"github.com/KrakenTech-LLC/gokrb5/v8/types"
 	"github.com/hashicorp/go-uuid"
 )
@@ -254,6 +255,13 @@ func (c *Credentials) WithPFX(pfxData []byte, password string) (*Credentials, er
 	c.caCerts = caCerts
 	c.keytab = keytab.New() // clear any keytab
 	c.password = ""         // clear password
+
+	// Try to extract the correct principal name from the certificate
+	if extractedPrincipal := pki.ExtractPrincipalFromCertificate(cert); extractedPrincipal != "" {
+		// Update the username if we found a better one in the certificate
+		c.username = extractedPrincipal
+	}
+
 	return c, nil
 }
 

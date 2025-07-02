@@ -1,11 +1,14 @@
 package main
 
 import (
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"github.com/KrakenTech-LLC/gokrb5/v8/client"
 	"github.com/KrakenTech-LLC/gokrb5/v8/config"
 	"github.com/KrakenTech-LLC/gokrb5/v8/credentials"
+	"github.com/KrakenTech-LLC/gokrb5/v8/pki"
 	"log"
 	"os"
 	"software.sslmate.com/src/go-pkcs12"
@@ -111,12 +114,19 @@ func main() {
 	fmt.Println("\n=== Attempting PKINIT Authentication ===")
 	fmt.Println("Connecting to KDC and performing certificate-based authentication...")
 
+	// Add debug information
+	fmt.Printf("Debug: Certificate has CA certs: %v\n", client.Credentials.HasCACerts())
+	if client.Credentials.HasCACerts() {
+		fmt.Printf("Debug: Number of CA certs: %d\n", len(client.Credentials.CACerts()))
+	}
+
 	startTime := time.Now()
 	err = client.Login()
 	duration := time.Since(startTime)
 
 	if err != nil {
 		fmt.Printf("❌ PKINIT authentication failed after %v\n", duration)
+		fmt.Printf("Debug: Full error details: %+v\n", err)
 		log.Fatalf("Authentication error: %v", err)
 	}
 
@@ -143,10 +153,40 @@ func main() {
 	fmt.Println("PKINIT authentication test completed successfully!")
 }
 
+// saveASReqForDebugging saves the AS-REQ message for debugging purposes
+func saveASReqForDebugging(asReqBytes []byte, filename string) {
+	// Save raw bytes
+	err := os.WriteFile(filename+".bin", asReqBytes, 0644)
+	if err != nil {
+		log.Printf("Warning: Could not save AS-REQ binary: %v", err)
+		return
+	}
+
+	// Save hex dump
+	hexDump := hex.Dump(asReqBytes)
+	err = os.WriteFile(filename+".hex", []byte(hexDump), 0644)
+	if err != nil {
+		log.Printf("Warning: Could not save AS-REQ hex dump: %v", err)
+		return
+	}
+
+	// Save base64
+	b64 := base64.StdEncoding.EncodeToString(asReqBytes)
+	err = os.WriteFile(filename+".b64", []byte(b64), 0644)
+	if err != nil {
+		log.Printf("Warning: Could not save AS-REQ base64: %v", err)
+		return
+	}
+
+	fmt.Printf("Debug: AS-REQ saved to %s.{bin,hex,b64} (%d bytes)\n", filename, len(asReqBytes))
+}
+
+// Note: Principal extraction functions are now in the pki package
+
 // extractUsernameFromPFX extracts the Kerberos principal name from a PFX certificate
 func extractUsernameFromPFX(pfxData []byte, password string) (string, error) {
 	// Decode the PFX to get the certificate
-	_, cert, _, err := pkcs12.DecodeChain(pfxData, password)
+	_, cert, caCerts, err := pkcs12.DecodeChain(pfxData, password)
 	if err != nil {
 		return "", fmt.Errorf("failed to decode PFX: %v", err)
 	}
@@ -154,6 +194,21 @@ func extractUsernameFromPFX(pfxData []byte, password string) (string, error) {
 	if cert == nil {
 		return "", fmt.Errorf("no certificate found in PFX")
 	}
+
+	// Debug: Show what we found in the PFX
+	fmt.Printf("   Debug: PFX contains %d CA certificates\n", len(caCerts))
+	for i, caCert := range caCerts {
+		fmt.Printf("   Debug: CA %d: %s\n", i+1, caCert.Subject.String())
+	}
+
+	// Extract the principal using the pki package function
+	principal := pki.ExtractPrincipalFromCertificate(cert)
+	if principal != "" {
+		fmt.Printf("   Found principal in certificate: %s\n", principal)
+		return principal, nil
+	}
+
+	return "", fmt.Errorf("no valid principal found in certificate")
 
 	// Try to extract username from Subject Alternative Names (SAN)
 	for _, name := range cert.DNSNames {
@@ -174,6 +229,50 @@ func extractUsernameFromPFX(pfxData []byte, password string) (string, error) {
 			if len(parts) == 2 {
 				fmt.Printf("   Found potential principal in SAN email: %s\n", email)
 				return parts[0], nil
+			}
+		}
+	}
+
+	// Try to extract from SAN extension (Microsoft UPN)
+	for _, ext := range cert.Extensions {
+		if ext.Id.String() == "2.5.29.17" { // Subject Alternative Name
+			// Look for UPN in the raw extension data
+			extStr := string(ext.Value)
+			if strings.Contains(extStr, "@") {
+				// Find the UPN pattern
+				for i := 0; i < len(extStr)-1; i++ {
+					if extStr[i] == '@' {
+						// Look backwards for the start of the username
+						start := i - 1
+						for start >= 0 && (extStr[start] >= 'A' && extStr[start] <= 'Z' ||
+							extStr[start] >= 'a' && extStr[start] <= 'z' ||
+							extStr[start] >= '0' && extStr[start] <= '9' ||
+							extStr[start] == '$' || extStr[start] == '-' || extStr[start] == '_') {
+							start--
+						}
+						start++
+
+						// Look forwards for the end of the realm
+						end := i + 1
+						for end < len(extStr) && (extStr[end] >= 'A' && extStr[end] <= 'Z' ||
+							extStr[end] >= 'a' && extStr[end] <= 'z' ||
+							extStr[end] >= '0' && extStr[end] <= '9' ||
+							extStr[end] == '.' || extStr[end] == '-') {
+							end++
+						}
+
+						if start < i && end > i+1 {
+							upn := extStr[start:end]
+							if strings.Contains(upn, "@") {
+								parts := strings.Split(upn, "@")
+								if len(parts) == 2 {
+									fmt.Printf("   Found UPN in SAN extension: %s\n", upn)
+									return parts[0], nil
+								}
+							}
+						}
+					}
+				}
 			}
 		}
 	}
