@@ -3,8 +3,11 @@ package credentials
 
 import (
 	"bytes"
+	"crypto/x509"
 	"encoding/gob"
 	"encoding/json"
+	"errors"
+	"software.sslmate.com/src/go-pkcs12"
 	"time"
 
 	"github.com/KrakenTech-LLC/gokrb5/v8/iana/nametype"
@@ -19,7 +22,7 @@ const (
 )
 
 // Credentials struct for a user.
-// Contains either a keytab, password or both.
+// Contains either a keytab, password, certificate, or other authentication methods.
 // Keytabs are used over passwords if both are defined.
 type Credentials struct {
 	username        string
@@ -30,6 +33,9 @@ type Credentials struct {
 	nthash          []byte
 	password        string
 	aeskey          []byte
+	certificate     *x509.Certificate
+	privateKey      interface{}         // Can be *rsa.PrivateKey, *ecdsa.PrivateKey, etc.
+	caCerts         []*x509.Certificate // CA certificates from PFX chain
 	attributes      map[string]interface{}
 	validUntil      time.Time
 	authenticated   bool
@@ -50,6 +56,9 @@ type marshalCredentials struct {
 	NTHash          bool
 	AESKey          bool
 	Password        bool
+	Certificate     bool
+	PrivateKey      bool
+	CACerts         bool
 	Attributes      map[string]interface{} `json:"-"`
 	ValidUntil      time.Time
 	Authenticated   bool
@@ -178,6 +187,74 @@ func (c *Credentials) HasAESKey() bool {
 		return true
 	}
 	return false
+}
+
+// WithCertificate sets the certificate and private key in the Credentials struct.
+func (c *Credentials) WithCertificate(cert *x509.Certificate, key interface{}) *Credentials {
+	c.certificate = cert
+	c.privateKey = key
+	c.caCerts = nil         // clear any CA certs since they weren't provided
+	c.keytab = keytab.New() // clear any keytab
+	c.password = ""         // clear password
+	return c
+}
+
+// WithCertificateChain sets the certificate, private key, and CA certificates in the Credentials struct.
+func (c *Credentials) WithCertificateChain(cert *x509.Certificate, key interface{}, caCerts []*x509.Certificate) *Credentials {
+	c.certificate = cert
+	c.privateKey = key
+	c.caCerts = caCerts
+	c.keytab = keytab.New() // clear any keytab
+	c.password = ""         // clear password
+	return c
+}
+
+// Certificate returns the credential's certificate.
+func (c *Credentials) Certificate() *x509.Certificate {
+	return c.certificate
+}
+
+// PrivateKey returns the credential's private key.
+func (c *Credentials) PrivateKey() interface{} {
+	return c.privateKey
+}
+
+// CACerts returns the credential's CA certificates.
+func (c *Credentials) CACerts() []*x509.Certificate {
+	return c.caCerts
+}
+
+// HasCertificate queries if the Credentials has a certificate and private key defined.
+func (c *Credentials) HasCertificate() bool {
+	return c.certificate != nil && c.privateKey != nil
+}
+
+// HasCACerts queries if the Credentials has CA certificates defined.
+func (c *Credentials) HasCACerts() bool {
+	return len(c.caCerts) > 0
+}
+
+// WithPFX sets the certificate and private key from a PFX/PKCS12 file.
+func (c *Credentials) WithPFX(pfxData []byte, password string) (*Credentials, error) {
+	privateKey, cert, caCerts, err := pkcs12.DecodeChain(pfxData, password)
+	if err != nil {
+		return c, errors.New("failed to decode PFX data: " + err.Error())
+	}
+
+	if cert == nil {
+		return c, errors.New("no certificate found in PFX data")
+	}
+
+	if privateKey == nil {
+		return c, errors.New("no private key found in PFX data")
+	}
+
+	c.certificate = cert
+	c.privateKey = privateKey
+	c.caCerts = caCerts
+	c.keytab = keytab.New() // clear any keytab
+	c.password = ""         // clear password
+	return c, nil
 }
 
 // SetValidUntil sets the expiry time of the credentials
@@ -388,6 +465,9 @@ func (c *Credentials) Marshal() ([]byte, error) {
 		Password:        c.HasPassword(),
 		NTHash:          c.HasNTHash(),
 		AESKey:          c.HasAESKey(),
+		Certificate:     c.HasCertificate(),
+		PrivateKey:      c.HasCertificate(),
+		CACerts:         c.HasCACerts(),
 		Attributes:      c.attributes,
 		ValidUntil:      c.validUntil,
 		Authenticated:   c.authenticated,
