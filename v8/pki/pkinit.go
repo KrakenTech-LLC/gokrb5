@@ -273,7 +273,7 @@ func ExtractPrincipalFromCertificate(cert *x509.Certificate) string {
 	if upn != "" {
 		// Extract just the username part before @
 		if parts := strings.Split(upn, "@"); len(parts) == 2 {
-			return parts[0]
+			return upn
 		}
 	}
 
@@ -283,7 +283,8 @@ func ExtractPrincipalFromCertificate(cert *x509.Certificate) string {
 			// Extract hostname from FQDN
 			parts := strings.Split(dns, ".")
 			if len(parts) > 0 {
-				return parts[0]
+				upn := parts[0] + "@" + strings.Join(parts[1:], ".")
+				return upn
 			}
 		}
 	}
