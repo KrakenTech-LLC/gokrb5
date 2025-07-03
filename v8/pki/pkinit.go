@@ -615,7 +615,11 @@ func GetPrincipalVariations(cert *x509.Certificate) []string {
 	var variations []string
 
 	// Get the primary principal
-	primary := ExtractPrincipalFromCertificate(cert)
+	usermame, domain, err := ExtractPrincipalFromCertificate(cert)
+	if err != nil {
+		return variations
+	}
+	primary := usermame + "@" + domain
 	if primary != "" {
 		variations = append(variations, primary)
 	}
