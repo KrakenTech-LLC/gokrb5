@@ -7,7 +7,9 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"software.sslmate.com/src/go-pkcs12"
+	"strings"
 	"time"
 
 	"github.com/KrakenTech-LLC/gokrb5/v8/iana/nametype"
@@ -257,9 +259,12 @@ func (c *Credentials) WithPFX(pfxData []byte, password string) (*Credentials, er
 	c.password = ""         // clear password
 
 	// Try to extract the correct principal name from the certificate
-	if extractedPrincipal := pki.ExtractPrincipalFromCertificate(cert); extractedPrincipal != "" {
+	if username, domain, err := pki.ExtractPrincipalFromCertificate(cert); err == nil {
 		// Update the username if we found a better one in the certificate
-		c.username = extractedPrincipal
+		c.username = fmt.Sprintf("%s@%s", username, domain)
+		c.realm = strings.ToUpper(domain)
+	} else {
+		return c, errors.New("failed to extract principal from certificate: " + err.Error())
 	}
 
 	return c, nil
