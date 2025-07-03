@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"errors"
+	"fmt"
 	"math/big"
 	"strings"
 	"time"
@@ -265,45 +266,344 @@ func createTrustedCertifiers(caCerts []*x509.Certificate) []TrustedCA {
 	return trustedCAs
 }
 
+// CertificateIdentification represents an identification found in a certificate
+type CertificateIdentification struct {
+	Type  string // "UPN", "DNS", "Email", "CN", etc.
+	Value string
+}
+
 // ExtractPrincipalFromCertificate extracts the best Kerberos principal from a certificate
-// This function tries multiple methods to find the correct principal name for PKINIT authentication
-func ExtractPrincipalFromCertificate(cert *x509.Certificate) string {
-	// 1. Try to extract UPN from SAN extension (most reliable for PKINIT)
+// This function implements the same logic as certipy for certificate identification
+func ExtractPrincipalFromCertificate(cert *x509.Certificate) (string, string, error) {
+	// Get all identifications from certificate
+	identifications := getIdentificationsFromCertificate(cert)
+
+	if len(identifications) == 0 {
+		return "", "", errors.New("could not find identification in the provided certificate")
+	}
+
+	// Use the first identification (certipy would prompt user, but we'll use first)
+	// In a real implementation, you might want to add logic to prefer certain types
+	var selectedIdentification CertificateIdentification
+	if len(identifications) > 1 {
+		// Prefer UPN over other types
+		for _, id := range identifications {
+			if id.Type == "UPN" {
+				selectedIdentification = id
+				break
+			}
+		}
+		// If no UPN found, use first identification
+		if selectedIdentification.Type == "" {
+			selectedIdentification = identifications[0]
+		}
+	} else {
+		selectedIdentification = identifications[0]
+	}
+
+	// Convert identification to username and domain parts
+	username, domain := certIdToParts(selectedIdentification)
+
+	if username == "" || domain == "" {
+		return "", "", errors.New("could not extract valid username and domain from certificate identification")
+	}
+
+	return strings.ToLower(username), strings.ToLower(domain), nil
+}
+
+// getIdentificationsFromCertificate extracts all possible identifications from a certificate
+// This mirrors the certipy get_identifications_from_certificate function
+func getIdentificationsFromCertificate(cert *x509.Certificate) []CertificateIdentification {
+	var identifications []CertificateIdentification
+
+	// 1. Extract UPN from Subject Alternative Name (most reliable for PKINIT)
 	upn := extractUPNFromSAN(cert)
 	if upn != "" {
-		// Extract just the username part before @
-		if parts := strings.Split(upn, "@"); len(parts) == 2 {
-			return upn
-		}
+		identifications = append(identifications, CertificateIdentification{
+			Type:  "UPN",
+			Value: upn,
+		})
 	}
 
-	// 2. Try DNS names in SAN
+	// 2. Extract DNS names from SAN
 	for _, dns := range cert.DNSNames {
-		if strings.Contains(dns, ".") {
-			// Extract hostname from FQDN
-			parts := strings.Split(dns, ".")
-			if len(parts) > 0 {
-				upn := parts[0] + "@" + strings.Join(parts[1:], ".")
-				return upn
-			}
+		if dns != "" {
+			identifications = append(identifications, CertificateIdentification{
+				Type:  "DNS",
+				Value: dns,
+			})
 		}
 	}
 
-	// 3. Try email addresses
+	// 3. Extract email addresses from SAN
 	for _, email := range cert.EmailAddresses {
-		if strings.Contains(email, "@") {
-			parts := strings.Split(email, "@")
-			if len(parts) == 2 {
-				return parts[0]
-			}
+		if email != "" {
+			identifications = append(identifications, CertificateIdentification{
+				Type:  "Email",
+				Value: email,
+			})
 		}
 	}
 
-	// 4. Try Common Name
+	// 4. Extract Common Name from Subject
 	cn := cert.Subject.CommonName
 	if cn != "" {
+		identifications = append(identifications, CertificateIdentification{
+			Type:  "CN",
+			Value: cn,
+		})
+	}
+
+	// 5. Extract other subject components that might be useful
+	for _, name := range cert.Subject.Names {
+		// Look for other OIDs that might contain useful information
+		if name.Type.String() != "2.5.4.3" { // Skip CN as we already have it
+			identifications = append(identifications, CertificateIdentification{
+				Type:  "Subject-" + name.Type.String(),
+				Value: fmt.Sprintf("%v", name.Value),
+			})
+		}
+	}
+
+	return identifications
+}
+
+// certIdToParts converts a certificate identification to username and domain parts
+// This mirrors the certipy cert_id_to_parts function
+func certIdToParts(identification CertificateIdentification) (string, string) {
+	switch identification.Type {
+	case "UPN":
+		// UPN format: username@domain.com
+		if strings.Contains(identification.Value, "@") {
+			parts := strings.Split(identification.Value, "@")
+			if len(parts) == 2 {
+				return parts[0], parts[1]
+			}
+		}
+
+	case "Email":
+		// Email format: username@domain.com
+		if strings.Contains(identification.Value, "@") {
+			parts := strings.Split(identification.Value, "@")
+			if len(parts) == 2 {
+				return parts[0], parts[1]
+			}
+		}
+
+	case "DNS":
+		// DNS format: hostname.domain.com
+		if strings.Contains(identification.Value, ".") {
+			parts := strings.Split(identification.Value, ".")
+			if len(parts) >= 2 {
+				hostname := parts[0]
+				domain := strings.Join(parts[1:], ".")
+				return hostname, domain
+			}
+		}
+
+	case "CN":
+		// Common Name - try to extract meaningful parts
+		cn := identification.Value
+
 		// Remove $ suffix if present (machine accounts)
-		return strings.TrimSuffix(cn, "$")
+		cn = strings.TrimSuffix(cn, "$")
+
+		// If CN contains @, treat it like UPN
+		if strings.Contains(cn, "@") {
+			parts := strings.Split(cn, "@")
+			if len(parts) == 2 {
+				return parts[0], parts[1]
+			}
+		}
+
+		// If CN contains domain-like structure
+		if strings.Contains(cn, ".") {
+			parts := strings.Split(cn, ".")
+			if len(parts) >= 2 {
+				hostname := parts[0]
+				domain := strings.Join(parts[1:], ".")
+				return hostname, domain
+			}
+		}
+
+		// Otherwise, return CN as username with empty domain
+		return cn, ""
+	}
+
+	return "", ""
+}
+
+// ExtractPrincipalFromCertificateSimple provides a simple interface that returns just the UPN
+// This is for backward compatibility with the old function signature
+func ExtractPrincipalFromCertificateSimple(cert *x509.Certificate) string {
+	username, domain, err := ExtractPrincipalFromCertificateWithValidation(cert, "", "")
+	if err != nil {
+		return ""
+	}
+	if username == "" || domain == "" {
+		return ""
+	}
+	return username + "@" + domain
+}
+
+// ExtractPrincipalFromCertificateWithValidation implements the complete certipy logic
+// for extracting and validating principal information from a certificate
+func ExtractPrincipalFromCertificateWithValidation(cert *x509.Certificate, providedUsername, providedDomain string) (string, string, error) {
+	// Get all identifications from certificate
+	identifications := getIdentificationsFromCertificate(cert)
+
+	var selectedIdentification CertificateIdentification
+
+	if len(identifications) > 1 {
+		// Multiple identifications found - prefer UPN, then Email, then DNS, then CN
+		for _, id := range identifications {
+			if id.Type == "UPN" {
+				selectedIdentification = id
+				break
+			}
+		}
+		if selectedIdentification.Type == "" {
+			for _, id := range identifications {
+				if id.Type == "Email" {
+					selectedIdentification = id
+					break
+				}
+			}
+		}
+		if selectedIdentification.Type == "" {
+			for _, id := range identifications {
+				if id.Type == "DNS" {
+					selectedIdentification = id
+					break
+				}
+			}
+		}
+		if selectedIdentification.Type == "" {
+			selectedIdentification = identifications[0] // Fallback to first
+		}
+	} else if len(identifications) == 1 {
+		selectedIdentification = identifications[0]
+	} else {
+		// No identifications found
+		if providedUsername == "" || providedDomain == "" {
+			return "", "", errors.New("username or domain is not specified, and identification information was not found in the certificate")
+		}
+		// Use provided credentials
+		return strings.ToLower(providedUsername), strings.ToLower(providedDomain), nil
+	}
+
+	// Convert identification to username and domain parts
+	certUsername, certDomain := certIdToParts(selectedIdentification)
+
+	// Determine final username and domain
+	finalUsername := providedUsername
+	finalDomain := providedDomain
+
+	// Username validation logic (mirrors certipy)
+	if finalUsername == "" {
+		finalUsername = certUsername
+	} else if certUsername != "" {
+		// Check if provided username matches certificate
+		if !usernameMatches(strings.ToLower(finalUsername), strings.ToLower(certUsername)) {
+			return "", "", errors.New(fmt.Sprintf("the provided username does not match the identification found in the provided certificate: %s - %s", finalUsername, certUsername))
+		}
+	}
+
+	// Domain validation logic (mirrors certipy)
+	if finalDomain == "" {
+		finalDomain = certDomain
+	} else if certDomain != "" {
+		// Check if provided domain matches certificate
+		if !domainMatches(strings.ToLower(finalDomain), strings.ToLower(certDomain)) {
+			return "", "", errors.New(fmt.Sprintf("the provided domain does not match the identification found in the provided certificate: %s - %s", finalDomain, certDomain))
+		}
+	}
+
+	// Final validation
+	if finalUsername == "" || finalDomain == "" {
+		return "", "", errors.New("username or domain is not specified, and identification information was not found in the certificate")
+	}
+
+	if len(finalUsername) == 0 || len(finalDomain) == 0 {
+		return "", "", errors.New(fmt.Sprintf("username or domain is invalid: %s@%s", finalUsername, finalDomain))
+	}
+
+	return strings.ToLower(finalUsername), strings.ToLower(finalDomain), nil
+}
+
+// usernameMatches checks if two usernames match according to certipy logic
+func usernameMatches(provided, fromCert string) bool {
+	// Direct match
+	if provided == fromCert {
+		return true
+	}
+
+	// Check if provided username matches with $ suffix (machine accounts)
+	if provided == fromCert+"$" {
+		return true
+	}
+
+	// Check if certificate username has $ suffix and matches without it
+	if strings.HasSuffix(fromCert, "$") && provided == strings.TrimSuffix(fromCert, "$") {
+		return true
+	}
+
+	return false
+}
+
+// domainMatches checks if two domains match according to certipy logic
+func domainMatches(provided, fromCert string) bool {
+	// Direct match
+	if provided == fromCert {
+		return true
+	}
+
+	// Check if certificate domain is a subdomain of provided domain
+	// e.g., provided="example.com", fromCert="sub.example.com"
+	providedWithDot := strings.TrimSuffix(provided, ".") + "."
+	if strings.HasSuffix(fromCert, providedWithDot) {
+		return true
+	}
+
+	return false
+}
+
+// GetObjectSIDFromCertificate extracts the object SID from certificate extensions
+// This mirrors the certipy get_object_sid_from_certificate function
+func GetObjectSIDFromCertificate(cert *x509.Certificate) string {
+	// Look for SID in certificate extensions
+	// The SID is typically in a custom extension with OID 1.3.6.1.4.1.311.25.2
+	for _, ext := range cert.Extensions {
+		if ext.Id.String() == "1.3.6.1.4.1.311.25.2" { // Microsoft SID extension
+			// Parse the SID from the extension value
+			// This is a simplified implementation - real SID parsing is more complex
+			return parseSIDFromBytes(ext.Value)
+		}
+	}
+	return ""
+}
+
+// parseSIDFromBytes attempts to parse a SID from raw bytes
+func parseSIDFromBytes(data []byte) string {
+	// This is a simplified SID parser
+	// A full implementation would properly decode the SID structure
+	if len(data) < 8 {
+		return ""
+	}
+
+	// Look for SID pattern in the data
+	// This is a basic implementation - you might need more sophisticated parsing
+	for i := 0; i < len(data)-3; i++ {
+		if data[i] == 'S' && data[i+1] == '-' {
+			// Found potential SID start, extract until end or invalid character
+			end := i + 2
+			for end < len(data) && (data[end] >= '0' && data[end] <= '9' || data[end] == '-') {
+				end++
+			}
+			if end > i+2 {
+				return string(data[i:end])
+			}
+		}
 	}
 
 	return ""
@@ -419,29 +719,26 @@ func AuthenticateWithPKINIT(cert *x509.Certificate, privateKey interface{}, caCe
 		AttemptedPrincipals: []string{},
 	}
 
-	// Get all possible principal variations
-	principals := GetPrincipalVariations(cert)
-	if len(principals) == 0 {
-		return result, errors.New("no valid principals found in certificate")
+	// Extract principal from certificate
+	username, domain, err := ExtractPrincipalFromCertificateWithValidation(cert, "", "")
+	if err != nil {
+		return result, err
 	}
 
-	// Try each principal until one works
-	for _, principal := range principals {
-		result.AttemptedPrincipals = append(result.AttemptedPrincipals, principal)
+	principal := username + "@" + domain
+	result.AttemptedPrincipals = append(result.AttemptedPrincipals, principal)
 
-		// This would need to be implemented with the actual client authentication
-		// For now, this is a placeholder that shows the structure
-		// The actual implementation would use the gokrb5 client
+	// This would need to be implemented with the actual client authentication
+	// For now, this is a placeholder that shows the structure
+	// The actual implementation would use the gokrb5 client
 
-		// TODO: Implement actual authentication attempt here
-		// success, err := tryAuthenticationWithPrincipal(principal, cert, privateKey, caCerts, realm, kdc)
-		// if success {
-		//     result.Success = true
-		//     result.SuccessfulPrincipal = principal
-		//     break
-		// }
-		// result.LastError = err
-	}
+	// TODO: Implement actual authentication attempt here
+	// success, err := tryAuthenticationWithPrincipal(principal, cert, privateKey, caCerts, realm, kdc)
+	// if success {
+	//     result.Success = true
+	//     result.SuccessfulPrincipal = principal
+	// }
+	// result.LastError = err
 
 	result.Duration = time.Since(startTime)
 	return result, result.LastError
@@ -480,8 +777,11 @@ func ValidateCertificateForPKINIT(cert *x509.Certificate) error {
 	}
 
 	// Try to extract a principal name
-	principal := ExtractPrincipalFromCertificate(cert)
-	if principal == "" {
+	username, domain, err := ExtractPrincipalFromCertificateWithValidation(cert, "", "")
+	if err != nil {
+		return errors.New("no valid principal name found in certificate: " + err.Error())
+	}
+	if username == "" || domain == "" {
 		return errors.New("no valid principal name found in certificate")
 	}
 
@@ -495,19 +795,38 @@ func GetCertificateInfo(cert *x509.Certificate) map[string]interface{} {
 	}
 
 	info := map[string]interface{}{
-		"subject":              cert.Subject.String(),
-		"issuer":               cert.Issuer.String(),
-		"serial_number":        cert.SerialNumber.String(),
-		"not_before":           cert.NotBefore,
-		"not_after":            cert.NotAfter,
-		"key_usage":            cert.KeyUsage,
-		"ext_key_usage":        cert.ExtKeyUsage,
-		"dns_names":            cert.DNSNames,
-		"email_addresses":      cert.EmailAddresses,
-		"ip_addresses":         cert.IPAddresses,
-		"extracted_principal":  ExtractPrincipalFromCertificate(cert),
-		"principal_variations": GetPrincipalVariations(cert),
-		"upn_from_san":         extractUPNFromSAN(cert),
+		"subject":         cert.Subject.String(),
+		"issuer":          cert.Issuer.String(),
+		"serial_number":   cert.SerialNumber.String(),
+		"not_before":      cert.NotBefore,
+		"not_after":       cert.NotAfter,
+		"key_usage":       cert.KeyUsage,
+		"ext_key_usage":   cert.ExtKeyUsage,
+		"dns_names":       cert.DNSNames,
+		"email_addresses": cert.EmailAddresses,
+		"ip_addresses":    cert.IPAddresses,
+		"upn_from_san":    extractUPNFromSAN(cert),
+	}
+
+	// Add extracted principal information
+	username, domain, err := ExtractPrincipalFromCertificateWithValidation(cert, "", "")
+	if err != nil {
+		info["principal_extraction_error"] = err.Error()
+	} else {
+		info["extracted_username"] = username
+		info["extracted_domain"] = domain
+		info["extracted_principal"] = username + "@" + domain
+	}
+
+	// Add all identifications found
+	identifications := getIdentificationsFromCertificate(cert)
+	info["identifications"] = identifications
+	info["principal_variations"] = GetPrincipalVariations(cert)
+
+	// Add object SID if present
+	objectSID := GetObjectSIDFromCertificate(cert)
+	if objectSID != "" {
+		info["object_sid"] = objectSID
 	}
 
 	// Add validation result
