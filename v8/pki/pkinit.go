@@ -4,7 +4,7 @@ import (
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
+	"crypto/sha1"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
@@ -19,11 +19,13 @@ import (
 	"software.sslmate.com/src/go-pkcs12"
 )
 
-// PKAuthenticator represents the PA-PK-AS-REQ structure for PKINIT
+// PKAuthenticator represents the PA-PK-AS-REQ structure for PKINIT (RFC 4556).
+// cusec and ctime are separate fields per the RFC; paChecksum is at tag:3.
 type PKAuthenticator struct {
-	CusecAndCtime time.Time `asn1:"explicit,tag:0"`
-	Nonce         int32     `asn1:"explicit,tag:1"`
-	PAChecksum    []byte    `asn1:"explicit,optional,tag:2"`
+	Cusec      int       `asn1:"explicit,tag:0"`
+	Ctime      time.Time `asn1:"generalized,explicit,tag:1"`
+	Nonce      int32     `asn1:"explicit,tag:2"`
+	PAChecksum []byte    `asn1:"explicit,optional,tag:3"`
 }
 
 // AuthPack represents the AuthPack structure for PKINIT
@@ -99,13 +101,19 @@ type Attribute struct {
 	Values []asn1.RawValue `asn1:"set"`
 }
 
-// OIDs for CMS
+// OIDs for CMS and PKINIT
 var (
-	OIDData          = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 1}
-	OIDSignedData    = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 2}
-	OIDSHA256        = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 1}
-	OIDRSAEncryption = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 1}
-	OIDRSASHA256     = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 11}
+	OIDData             = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 1}
+	OIDSignedData       = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 2}
+	OIDSHA256           = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 1}
+	OIDRSAEncryption    = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 1}
+	OIDRSASHA256        = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 11}
+	// Required for PKINIT per RFC 4556 — Windows KDCs validate these specifically.
+	OIDPKINITAuthData = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 2, 3, 1}        // id-pkinit-authData
+	OIDSHA1           = asn1.ObjectIdentifier{1, 3, 14, 3, 2, 26}             // sha1
+	OIDSHA1RSA        = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 5}     // sha1WithRSAEncryption
+	OIDContentType    = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 3}     // contentType attr
+	OIDMessageDigest  = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 4}     // messageDigest attr
 )
 
 // CreatePKINITAuthPack creates a basic AuthPack for PKINIT
@@ -114,132 +122,157 @@ func CreatePKINITAuthPack(clientCert *x509.Certificate, nonce int32) (*AuthPack,
 		return nil, errors.New("client certificate is required")
 	}
 
-	// Create PKAuthenticator
+	now := time.Now().UTC()
 	pkAuth := PKAuthenticator{
-		CusecAndCtime: time.Now().UTC(), // Current time
-		Nonce:         nonce,
-		// PAChecksum would be calculated based on the AS-REQ
+		Cusec: now.Nanosecond() / 1000,
+		Ctime: now,
+		Nonce: nonce,
 	}
 
-	// Create AuthPack
-	authPack := &AuthPack{
-		PKAuthenticator: pkAuth,
-		// ClientPublicValue would contain DH public key
-		// SupportedCMSTypes would list supported algorithms
-		// ClientDHNonce would be random bytes for DH exchange
-	}
-
-	return authPack, nil
+	return &AuthPack{PKAuthenticator: pkAuth}, nil
 }
 
-// CreatePKINITAuthPackWithChecksum creates an AuthPack with PAChecksum calculated from AS-REQ body
+// CreatePKINITAuthPackWithChecksum creates an AuthPack with PAChecksum calculated from AS-REQ body.
+// Windows KDCs require SHA1 for the paChecksum per RFC 4556 §3.2.1.
 func CreatePKINITAuthPackWithChecksum(clientCert *x509.Certificate, nonce int32, asReqBody []byte) (*AuthPack, error) {
 	if clientCert == nil {
 		return nil, errors.New("client certificate is required")
 	}
 
-	// Calculate PAChecksum using SHA-256 of AS-REQ body
-	hash := sha256.Sum256(asReqBody)
-	paChecksum := hash[:]
+	// RFC 4556 §3.2.1: paChecksum is SHA1 of the DER-encoded KDC-REQ-BODY
+	h := sha1.New()
+	h.Write(asReqBody)
+	paChecksum := h.Sum(nil)
 
-	// Create PKAuthenticator with checksum
+	now := time.Now().UTC()
 	pkAuth := PKAuthenticator{
-		CusecAndCtime: time.Now().UTC(), // Current time
-		Nonce:         nonce,
-		PAChecksum:    paChecksum, // Checksum of AS-REQ body
+		Cusec:      now.Nanosecond() / 1000,
+		Ctime:      now,
+		Nonce:      nonce,
+		PAChecksum: paChecksum,
 	}
 
-	// Create AuthPack
-	authPack := &AuthPack{
-		PKAuthenticator: pkAuth,
-		// ClientPublicValue would contain DH public key
-		// SupportedCMSTypes would list supported algorithms
-		// ClientDHNonce would be random bytes for DH exchange
-	}
-
-	return authPack, nil
+	return &AuthPack{PKAuthenticator: pkAuth}, nil
 }
 
-// signAuthPackWithCMS signs the AuthPack using CMS SignedData per RFC 4556
+// signAuthPackWithCMS signs the AuthPack using CMS SignedData per RFC 4556.
+//
+// Critical requirements for Windows KDC compatibility:
+//   - Digest algorithm must be SHA1 (not SHA256)
+//   - EncapContentInfo.eContentType must be id-pkinit-authData (1.3.6.1.5.2.3.1)
+//   - SignedData.version must be 3
+//   - SignerInfo must include authenticated attributes (contentType + messageDigest)
+//   - The signature covers the SET-encoded authenticated attributes, not the content directly
 func signAuthPackWithCMS(authPack *AuthPack, cert *x509.Certificate, privateKey interface{}, caCerts []*x509.Certificate) ([]byte, error) {
+	rsaKey, ok := privateKey.(*rsa.PrivateKey)
+	if !ok {
+		return nil, errors.New("unsupported private key type: only RSA is supported for PKINIT")
+	}
+
 	// 1. Marshal AuthPack to DER
 	authPackBytes, err := asn1.Marshal(*authPack)
 	if err != nil {
 		return nil, errors.New("failed to marshal AuthPack: " + err.Error())
 	}
 
-	// 2. Create content hash (SHA-256) - this should be the hash of the content
-	hash := sha256.Sum256(authPackBytes)
+	// 2. SHA1 digest of the content (authPackBytes)
+	contentDigest := sha1.Sum(authPackBytes)
 
-	// 3. Sign the hash with private key
-	var signature []byte
-	switch key := privateKey.(type) {
-	case *rsa.PrivateKey:
-		signature, err = rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, hash[:])
-		if err != nil {
-			return nil, errors.New("failed to sign with RSA key: " + err.Error())
-		}
-	default:
-		return nil, errors.New("unsupported private key type")
+	// 3. Build authenticated attributes: contentType + messageDigest
+	//    These must be marshaled as a SET for signing.
+	contentTypeAttr := Attribute{
+		Type:   OIDContentType,
+		Values: []asn1.RawValue{{FullBytes: mustMarshalOID(OIDPKINITAuthData)}},
+	}
+	msgDigestAttr := Attribute{
+		Type:   OIDMessageDigest,
+		Values: []asn1.RawValue{{FullBytes: mustMarshalBytes(contentDigest[:])}},
+	}
+	signedAttrs := []Attribute{contentTypeAttr, msgDigestAttr}
+
+	signedAttrsBytes, err := asn1.MarshalWithParams(signedAttrs, "set")
+	if err != nil {
+		return nil, errors.New("failed to marshal signed attributes: " + err.Error())
 	}
 
-	// 4. Create SignerInfo with proper structure
+	// 4. Sign the SET-encoded signed attributes with SHA1+RSA
+	signedAttrsHash := sha1.Sum(signedAttrsBytes)
+	signature, err := rsa.SignPKCS1v15(rand.Reader, rsaKey, crypto.SHA1, signedAttrsHash[:])
+	if err != nil {
+		return nil, errors.New("failed to sign: " + err.Error())
+	}
+
+	// 5. Build issuer DER bytes for IssuerAndSerialNumber
+	issuerBytes, err := asn1.Marshal(cert.Issuer.ToRDNSequence())
+	if err != nil {
+		return nil, errors.New("failed to marshal issuer: " + err.Error())
+	}
+
+	// 6. Assemble SignerInfo
 	signerInfo := SignerInfo{
 		Version: 1,
 		SID: SignerIdentifier{
 			IssuerAndSerialNumber: IssuerAndSerialNumber{
-				Issuer:       asn1.RawValue{FullBytes: cert.RawIssuer},
+				Issuer:       asn1.RawValue{FullBytes: issuerBytes},
 				SerialNumber: cert.SerialNumber,
 			},
 		},
-		DigestAlgorithm: pkix.AlgorithmIdentifier{
-			Algorithm: OIDSHA256,
-		},
-		DigestEncryptionAlgorithm: pkix.AlgorithmIdentifier{
-			Algorithm: OIDRSASHA256,
-		},
-		EncryptedDigest: signature,
+		DigestAlgorithm:           pkix.AlgorithmIdentifier{Algorithm: OIDSHA1},
+		AuthenticatedAttrs:        signedAttrs,
+		DigestEncryptionAlgorithm: pkix.AlgorithmIdentifier{Algorithm: OIDSHA1RSA},
+		EncryptedDigest:           signature,
 	}
 
-	// 5. Prepare certificates for inclusion - always include client cert
-	var certRawValues []asn1.RawValue
-	certRawValues = append(certRawValues, asn1.RawValue{FullBytes: cert.Raw})
-	for _, caCert := range caCerts {
-		certRawValues = append(certRawValues, asn1.RawValue{FullBytes: caCert.Raw})
+	// 7. Certificates: client cert first, then CA chain
+	certRawValues := []asn1.RawValue{{FullBytes: cert.Raw}}
+	for _, ca := range caCerts {
+		certRawValues = append(certRawValues, asn1.RawValue{FullBytes: ca.Raw})
 	}
 
-	// 6. Create SignedData with embedded content (try attached signature)
+	// 8. SignedData — version 3, SHA1, id-pkinit-authData content type
 	signedData := SignedData{
-		Version: 1,
-		DigestAlgorithms: []pkix.AlgorithmIdentifier{
-			{Algorithm: OIDSHA256},
-		},
+		Version:          3,
+		DigestAlgorithms: []pkix.AlgorithmIdentifier{{Algorithm: OIDSHA1}},
 		ContentInfo: ContentInfo{
-			ContentType: OIDData,
+			ContentType: OIDPKINITAuthData,
 			Content: asn1.RawValue{
-				Tag:        asn1.TagOctetString,
-				Class:      asn1.ClassUniversal,
-				IsCompound: false,
-				Bytes:      authPackBytes,
+				Tag:   asn1.TagOctetString,
+				Bytes: authPackBytes,
 			},
 		},
 		Certificates: certRawValues,
 		SignerInfos:  []SignerInfo{signerInfo},
 	}
 
-	// 7. Marshal SignedData and wrap in ContentInfo
 	signedDataBytes, err := asn1.Marshal(signedData)
 	if err != nil {
 		return nil, errors.New("failed to marshal SignedData: " + err.Error())
 	}
 
-	// 8. Create final ContentInfo wrapper
-	contentInfo := ContentInfo{
+	// 9. Wrap in outer ContentInfo with id-signedData
+	ci := ContentInfo{
 		ContentType: OIDSignedData,
 		Content:     asn1.RawValue{FullBytes: signedDataBytes},
 	}
+	return asn1.Marshal(ci)
+}
 
-	return asn1.Marshal(contentInfo)
+// mustMarshalOID marshals an OID to DER or panics.
+func mustMarshalOID(oid asn1.ObjectIdentifier) []byte {
+	b, err := asn1.Marshal(oid)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+// mustMarshalBytes marshals a byte slice as an OCTET STRING or panics.
+func mustMarshalBytes(b []byte) []byte {
+	out, err := asn1.Marshal(b)
+	if err != nil {
+		panic(err)
+	}
+	return out
 }
 
 // createTrustedCertifiers creates TrustedCA entries from CA certificates
