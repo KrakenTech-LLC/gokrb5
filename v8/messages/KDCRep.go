@@ -228,7 +228,46 @@ func (k *ASRep) DecryptEncPart(c *credentials.Credentials) (types.EncryptionKey,
 			return key, krberror.Errorf(err, krberror.DecryptingError, "error decrypting AS_REP encrypted part")
 		}
 	}
-	if !c.HasKeytab() && !c.HasPassword() {
+	if c.HasNTHash() {
+		if k.EncPart.EType != 23 {
+			return key, krberror.NewErrorf(
+				krberror.DecryptingError,
+				"NT hash credentials can only decrypt rc4-hmac (etype 23) AS_REP encparts; got etype %d",
+				k.EncPart.EType)
+		}
+		key = types.EncryptionKey{
+			KeyType:  k.EncPart.EType,
+			KeyValue: c.NTHash(),
+		}
+	}
+	if c.HasAESKey() {
+		switch k.EncPart.EType {
+		case 17, 19:
+			if len(c.AESKey()) != 16 {
+				return key, krberror.NewErrorf(
+					krberror.DecryptingError,
+					"AES128 AS_REP encpart requires a 16-byte key; got %d bytes",
+					len(c.AESKey()))
+			}
+		case 18, 20:
+			if len(c.AESKey()) != 32 {
+				return key, krberror.NewErrorf(
+					krberror.DecryptingError,
+					"AES256 AS_REP encpart requires a 32-byte key; got %d bytes",
+					len(c.AESKey()))
+			}
+		default:
+			return key, krberror.NewErrorf(
+				krberror.DecryptingError,
+				"AES key credentials cannot decrypt AS_REP encpart etype %d",
+				k.EncPart.EType)
+		}
+		key = types.EncryptionKey{
+			KeyType:  k.EncPart.EType,
+			KeyValue: c.AESKey(),
+		}
+	}
+	if !c.HasKeytab() && !c.HasPassword() && !c.HasNTHash() && !c.HasAESKey() {
 		return key, krberror.NewErrorf(krberror.DecryptingError, "no secret available in credentials to perform decryption of AS_REP encrypted part")
 	}
 	b, err := crypto.DecryptEncPart(k.EncPart, key, keyusage.AS_REP_ENCPART)

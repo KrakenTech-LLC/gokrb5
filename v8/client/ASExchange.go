@@ -101,7 +101,18 @@ func setPAData(cl *Client, krberr *messages.KRBError, ASReq *messages.ASReq) err
 			// There is no KRB Error that tells us the etype to use
 			etn := cl.settings.preAuthEType // Use the etype that may have previously been negotiated
 			if etn == 0 {
-				etn = int32(cl.Config.LibDefaults.PreferredPreauthTypes[0]) // Resort to config
+				switch {
+				case cl.Credentials.HasNTHash():
+					etn = 23 // rc4-hmac
+				case cl.Credentials.HasAESKey():
+					if len(cl.Credentials.AESKey()) == 32 {
+						etn = 18 // aes256-cts-hmac-sha1-96
+					} else {
+						etn = 17 // aes128-cts-hmac-sha1-96
+					}
+				default:
+					etn = int32(cl.Config.LibDefaults.PreferredPreauthTypes[0]) // Resort to config
+				}
 			}
 			et, err = crypto.GetEtype(etn)
 			if err != nil {

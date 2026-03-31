@@ -319,13 +319,53 @@ func (cl *Client) Key(etype etype.EType, kvno int, krberr *messages.KRBError) (t
 		}
 		key, _, err := crypto.GetKeyFromPassword(cl.Credentials.Password(), cl.Credentials.CName(), cl.Credentials.Domain(), etype.GetETypeID(), types.PADataSequence{})
 		return key, 0, err
+	} else if cl.Credentials.HasNTHash() {
+		if etype == nil {
+			return types.EncryptionKey{}, 0, errors.New("etype is required for NT-hash authentication")
+		}
+		if etype.GetETypeID() != 23 {
+			return types.EncryptionKey{}, 0, fmt.Errorf(
+				"NT hash credentials only support rc4-hmac (etype 23), got etype %d",
+				etype.GetETypeID())
+		}
+		return types.EncryptionKey{
+			KeyType:  etype.GetETypeID(),
+			KeyValue: cl.Credentials.NTHash(),
+		}, 0, nil
+	} else if cl.Credentials.HasAESKey() {
+		if etype == nil {
+			return types.EncryptionKey{}, 0, errors.New("etype is required for AES-key authentication")
+		}
+		keyBytes := cl.Credentials.AESKey()
+		switch etype.GetETypeID() {
+		case 17, 19:
+			if len(keyBytes) != 16 {
+				return types.EncryptionKey{}, 0, fmt.Errorf(
+					"AES128 etype %d requires a 16-byte key, got %d bytes",
+					etype.GetETypeID(), len(keyBytes))
+			}
+		case 18, 20:
+			if len(keyBytes) != 32 {
+				return types.EncryptionKey{}, 0, fmt.Errorf(
+					"AES256 etype %d requires a 32-byte key, got %d bytes",
+					etype.GetETypeID(), len(keyBytes))
+			}
+		default:
+			return types.EncryptionKey{}, 0, fmt.Errorf(
+				"AES key credentials do not support etype %d",
+				etype.GetETypeID())
+		}
+		return types.EncryptionKey{
+			KeyType:  etype.GetETypeID(),
+			KeyValue: keyBytes,
+		}, 0, nil
 	} else if cl.Credentials.HasCertificate() {
 		// For PKINIT, we don't derive keys the same way as password/keytab
 		// The key derivation happens during the DH exchange in the AS exchange
 		// For now, return a placeholder - this should be handled by the PKINIT protocol
 		return types.EncryptionKey{}, 0, errors.New("PKINIT key derivation should be handled during AS exchange, not in Key() method")
 	}
-	return types.EncryptionKey{}, 0, errors.New("credential has neither keytab, password, nor certificate to generate key")
+	return types.EncryptionKey{}, 0, errors.New("credential has neither keytab, password, NT hash, AES key, nor certificate to generate key")
 }
 
 // IsConfigured indicates if the client has the values required set.
@@ -336,11 +376,16 @@ func (cl *Client) IsConfigured() (bool, error) {
 	if cl.Credentials.Domain() == "" {
 		return false, errors.New("client does not have a define realm")
 	}
-	// Client needs to have either a password, keytab, certificate, or a session already (later when loading from CCache)
-	if !cl.Credentials.HasPassword() && !cl.Credentials.HasKeytab() && !cl.Credentials.HasCertificate() {
+	// Client needs to have either a password, keytab, NT hash, AES key, certificate,
+	// or a session already (later when loading from CCache).
+	if !cl.Credentials.HasPassword() &&
+		!cl.Credentials.HasKeytab() &&
+		!cl.Credentials.HasNTHash() &&
+		!cl.Credentials.HasAESKey() &&
+		!cl.Credentials.HasCertificate() {
 		authTime, _, _, _, err := cl.sessionTimes(cl.Credentials.Domain())
 		if err != nil || authTime.IsZero() {
-			return false, errors.New("client has neither a keytab, password, nor certificate set and no session")
+			return false, errors.New("client has neither a keytab, password, NT hash, AES key, nor certificate set and no session")
 		}
 	}
 	if !cl.Config.LibDefaults.DNSLookupKDC {
@@ -361,7 +406,11 @@ func (cl *Client) Login() error {
 	if ok, err := cl.IsConfigured(); !ok {
 		return err
 	}
-	if !cl.Credentials.HasPassword() && !cl.Credentials.HasKeytab() && !cl.Credentials.HasCertificate() {
+	if !cl.Credentials.HasPassword() &&
+		!cl.Credentials.HasKeytab() &&
+		!cl.Credentials.HasNTHash() &&
+		!cl.Credentials.HasAESKey() &&
+		!cl.Credentials.HasCertificate() {
 		_, endTime, _, _, err := cl.sessionTimes(cl.Credentials.Domain())
 		if err != nil {
 			return krberror.Errorf(err, krberror.KRBMsgError, "no user credentials available and error getting any existing session")
@@ -378,7 +427,7 @@ func (cl *Client) Login() error {
 		return cl.loginWithCertificate()
 	}
 
-	// Handle password/keytab authentication (standard AS exchange)
+	// Handle password/keytab/hash/AES authentication (standard AS exchange)
 	ASReq, err := messages.NewASReqForTGT(cl.Credentials.Domain(), cl.Config, cl.Credentials.CName())
 	if err != nil {
 		return krberror.Errorf(err, krberror.KRBMsgError, "error generating new AS_REQ")
