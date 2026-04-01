@@ -12,6 +12,12 @@ import (
 	"github.com/KrakenTech-LLC/gokrb5/v8/messages"
 )
 
+// SendToKDC is an exported wrapper for sendToKDC, used by S4U and
+// other callers that need raw KDC communication.
+func (cl *Client) SendToKDC(b []byte, realm string) ([]byte, error) {
+	return cl.sendToKDC(b, realm)
+}
+
 // sendToKDC performs network actions to send data to the KDC.
 func (cl *Client) sendToKDC(b []byte, realm string) ([]byte, error) {
 	var rb []byte
