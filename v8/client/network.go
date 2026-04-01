@@ -12,7 +12,7 @@ import (
 	"github.com/KrakenTech-LLC/gokrb5/v8/messages"
 )
 
-// SendToKDC performs network actions to send data to the KDC.
+// sendToKDC performs network actions to send data to the KDC.
 func (cl *Client) sendToKDC(b []byte, realm string) ([]byte, error) {
 	var rb []byte
 	if cl.Config.LibDefaults.UDPPreferenceLimit == 1 {

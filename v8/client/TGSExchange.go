@@ -22,7 +22,13 @@ func (cl *Client) TGSREQGenerateAndExchange(spn types.PrincipalName, kdcRealm st
 // TGSExchange exchanges the provided TGS_REQ with the KDC to retrieve a TGS_REP.
 // Referrals are automatically handled.
 // The client's cache is updated with the ticket received.
-func (cl *Client) TGSExchange(tgsReq messages.TGSReq, kdcRealm string, tgt messages.Ticket, sessionKey types.EncryptionKey, referral int) (messages.TGSReq, messages.TGSRep, error) {
+//
+// An optional expectedCName may be passed for S4U exchanges where the CName
+// in the reply differs from the requesting principal (it will be the
+// impersonated user instead). When provided, the reply CName is verified
+// against this value instead of the request CName. Existing callers that
+// omit the parameter get the default behavior (verify against request CName).
+func (cl *Client) TGSExchange(tgsReq messages.TGSReq, kdcRealm string, tgt messages.Ticket, sessionKey types.EncryptionKey, referral int, expectedCName ...types.PrincipalName) (messages.TGSReq, messages.TGSRep, error) {
 	var tgsRep messages.TGSRep
 	b, err := tgsReq.Marshal()
 	if err != nil {
@@ -43,8 +49,19 @@ func (cl *Client) TGSExchange(tgsReq messages.TGSReq, kdcRealm string, tgt messa
 	if err != nil {
 		return tgsReq, tgsRep, krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: failed to process the TGS_REP")
 	}
-	if ok, err := tgsRep.Verify(cl.Config, tgsReq); !ok {
-		return tgsReq, tgsRep, krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: TGS_REP is not valid")
+	if len(expectedCName) > 0 {
+		// S4U: verify the reply CName matches the impersonated user,
+		// not the requesting principal.
+		replyCName := tgsRep.CName
+		if !replyCName.Equal(expectedCName[0]) {
+			return tgsReq, tgsRep, krberror.Errorf(nil, krberror.KRBMsgError,
+				"TGS Exchange Error: CName in S4U response does not match expected. Expected: %v; Got: %v",
+				expectedCName[0], replyCName)
+		}
+	} else {
+		if ok, err := tgsRep.Verify(cl.Config, tgsReq); !ok {
+			return tgsReq, tgsRep, krberror.Errorf(err, krberror.EncodingError, "TGS Exchange Error: TGS_REP is not valid")
+		}
 	}
 
 	if tgsRep.Ticket.SName.NameString[0] == "krbtgt" && !tgsRep.Ticket.SName.Equal(tgsReq.ReqBody.SName) {
