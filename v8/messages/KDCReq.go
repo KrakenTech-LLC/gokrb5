@@ -175,6 +175,66 @@ func NewUser2UserTGSReq(cname types.PrincipalName, kdcRealm string, c *config.Co
 	return a, err
 }
 
+// NewS4USelfTGSReq builds a TGS-REQ for S4U2Self (MS-SFU protocol extension).
+// The authenticator does NOT include a checksum over the ReqBody, matching
+// the impacket/Rubeus implementation.  The caller must append PA-FOR-USER
+// padata to the returned request's PAData slice before sending.
+func NewS4USelfTGSReq(cname types.PrincipalName, kdcRealm string, c *config.Config, tgt Ticket, sessionKey types.EncryptionKey, sname types.PrincipalName) (TGSReq, error) {
+	a, err := tgsReq(cname, sname, kdcRealm, false, c)
+	if err != nil {
+		return a, err
+	}
+	types.SetFlag(&a.ReqBody.KDCOptions, flags.Forwardable)
+	types.SetFlag(&a.ReqBody.KDCOptions, flags.Renewable)
+	types.SetFlag(&a.ReqBody.KDCOptions, flags.Canonicalize)
+	err = a.setS4UPAData(tgt, sessionKey)
+	return a, err
+}
+
+// NewS4UProxyTGSReq builds a TGS-REQ for S4U2Proxy (constrained delegation).
+// The s4u2selfTicket is included in AdditionalTickets and the CNAME-IN-ADDL-TKT
+// flag is set.
+func NewS4UProxyTGSReq(cname types.PrincipalName, kdcRealm string, c *config.Config, tgt Ticket, sessionKey types.EncryptionKey, sname types.PrincipalName, s4u2selfTicket Ticket) (TGSReq, error) {
+	a, err := tgsReq(cname, sname, kdcRealm, false, c)
+	if err != nil {
+		return a, err
+	}
+	types.SetFlag(&a.ReqBody.KDCOptions, flags.Forwardable)
+	types.SetFlag(&a.ReqBody.KDCOptions, flags.Renewable)
+	types.SetFlag(&a.ReqBody.KDCOptions, flags.Canonicalize)
+	types.SetFlag(&a.ReqBody.KDCOptions, 14) // CNAME-IN-ADDL-TKT
+	a.ReqBody.AdditionalTickets = []Ticket{s4u2selfTicket}
+	err = a.setS4UPAData(tgt, sessionKey)
+	return a, err
+}
+
+// setS4UPAData builds an AP-REQ authenticator WITHOUT a checksum over the
+// request body.  This matches the impacket/Rubeus behavior for S4U requests
+// and avoids KRB_AP_ERR_MODIFIED errors caused by checksum mismatches.
+func (k *TGSReq) setS4UPAData(tgt Ticket, sessionKey types.EncryptionKey) error {
+	auth, err := types.NewAuthenticator(tgt.Realm, k.ReqBody.CName)
+	if err != nil {
+		return krberror.Errorf(err, krberror.KRBMsgError, "error generating new authenticator")
+	}
+	// Deliberately omit auth.Cksum — the checksum field is OPTIONAL per
+	// RFC 4120 §5.5.1 and impacket never includes it for S4U requests.
+	apReq, err := NewAPReq(tgt, sessionKey, auth)
+	if err != nil {
+		return krberror.Errorf(err, krberror.KRBMsgError, "error generating new AP_REQ")
+	}
+	apb, err := apReq.Marshal()
+	if err != nil {
+		return krberror.Errorf(err, krberror.EncodingError, "error marshaling AP_REQ for S4U")
+	}
+	k.PAData = types.PADataSequence{
+		types.PAData{
+			PADataType:  patype.PA_TGS_REQ,
+			PADataValue: apb,
+		},
+	}
+	return nil
+}
+
 // tgsReq populates the fields for a TGS_REQ
 func tgsReq(cname, sname types.PrincipalName, kdcRealm string, renewal bool, c *config.Config) (TGSReq, error) {
 	nonce, err := rand.Int(rand.Reader, big.NewInt(math.MaxInt32))
