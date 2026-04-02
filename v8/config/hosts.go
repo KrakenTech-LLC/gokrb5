@@ -3,11 +3,12 @@ package config
 import (
 	"context"
 	"fmt"
-	"golang.org/x/net/proxy"
 	"math/rand"
 	"net"
 	"strconv"
 	"strings"
+
+	"golang.org/x/net/proxy"
 
 	"github.com/jcmturner/dnsutils/v2"
 )

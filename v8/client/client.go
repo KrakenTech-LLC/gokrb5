@@ -6,10 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jcmturner/gofork/encoding/asn1"
 	"io"
 	"strings"
 	"time"
+
+	"github.com/jcmturner/gofork/encoding/asn1"
 
 	"github.com/KrakenTech-LLC/gokrb5/v8/config"
 	"github.com/KrakenTech-LLC/gokrb5/v8/credentials"

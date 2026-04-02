@@ -2,6 +2,8 @@ package client
 
 import (
 	"crypto/rand"
+	"math/big"
+
 	"github.com/KrakenTech-LLC/gokrb5/v8/crypto"
 	"github.com/KrakenTech-LLC/gokrb5/v8/crypto/etype"
 	"github.com/KrakenTech-LLC/gokrb5/v8/iana/errorcode"
@@ -11,7 +13,6 @@ import (
 	"github.com/KrakenTech-LLC/gokrb5/v8/messages"
 	"github.com/KrakenTech-LLC/gokrb5/v8/pki"
 	"github.com/KrakenTech-LLC/gokrb5/v8/types"
-	"math/big"
 )
 
 // ASExchange performs an AS exchange for the client to retrieve a TGT.

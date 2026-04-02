@@ -8,9 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"software.sslmate.com/src/go-pkcs12"
 	"strings"
 	"time"
+
+	"software.sslmate.com/src/go-pkcs12"
 
 	"github.com/KrakenTech-LLC/gokrb5/v8/iana/nametype"
 	"github.com/KrakenTech-LLC/gokrb5/v8/keytab"

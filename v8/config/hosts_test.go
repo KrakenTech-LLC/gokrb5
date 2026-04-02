@@ -1,8 +1,9 @@
 package config
 
 import (
-	"github.com/KrakenTech-LLC/gokrb5/v8/test"
 	"testing"
+
+	"github.com/KrakenTech-LLC/gokrb5/v8/test"
 
 	"github.com/KrakenTech-LLC/gokrb5/v8/test/testdata"
 	"github.com/stretchr/testify/assert"

@@ -17,4 +17,4 @@ require (
 	golang.org/x/net v0.10.0 // indirect
 )
 
-replace github.com/KrakenTech-LLC/gokrb5/v8 => ../..
+replace github.com/KrakenTech-LLC/gokrb5/v8 => ./../..

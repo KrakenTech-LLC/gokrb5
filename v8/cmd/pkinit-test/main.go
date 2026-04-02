@@ -1,19 +1,19 @@
 package main
 
 import (
-	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"log"
+	"os"
+	"strings"
+	"time"
+
 	"github.com/KrakenTech-LLC/gokrb5/v8/client"
 	"github.com/KrakenTech-LLC/gokrb5/v8/config"
 	"github.com/KrakenTech-LLC/gokrb5/v8/credentials"
 	"github.com/KrakenTech-LLC/gokrb5/v8/pki"
-	"log"
-	"os"
 	"software.sslmate.com/src/go-pkcs12"
-	"strings"
-	"time"
 )
 
 func main() {

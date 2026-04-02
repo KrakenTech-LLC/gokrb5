@@ -3,11 +3,12 @@ package client
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/jcmturner/gofork/encoding/asn1"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jcmturner/gofork/encoding/asn1"
 
 	"github.com/KrakenTech-LLC/gokrb5/v8/iana/nametype"
 	"github.com/KrakenTech-LLC/gokrb5/v8/krberror"

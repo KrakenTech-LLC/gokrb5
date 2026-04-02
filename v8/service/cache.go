@@ -2,9 +2,10 @@
 package service
 
 import (
-	"github.com/KrakenTech-LLC/gokrb5/v8/types"
 	"sync"
 	"time"
+
+	"github.com/KrakenTech-LLC/gokrb5/v8/types"
 )
 
 // Replay cache is required as specified in RFC 4120 section 3.2.3

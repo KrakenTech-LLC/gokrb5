@@ -3,10 +3,11 @@ package client
 import (
 	"encoding/json"
 	"errors"
-	"github.com/jcmturner/gofork/encoding/asn1"
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/jcmturner/gofork/encoding/asn1"
 
 	"github.com/KrakenTech-LLC/gokrb5/v8/messages"
 	"github.com/KrakenTech-LLC/gokrb5/v8/types"

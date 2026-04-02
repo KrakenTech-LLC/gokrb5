@@ -176,10 +176,12 @@ func (cl *Client) sendKDCTCP(realm string, b []byte) ([]byte, error) {
 	if err != nil {
 		return r, err
 	}
-	if cl.Config.LibDefaults.TCPConnGen == nil {
-		r, err = dialSendTCP(kdcs, b)
-	} else {
+	if cl.Config.LibDefaults.TCPDialer != nil {
+		r, err = dialSendTCPGeneric(kdcs, b, cl.Config.LibDefaults.TCPDialer)
+	} else if cl.Config.LibDefaults.TCPConnGen != nil {
 		r, err = dialSendTCPCustom(kdcs, b, cl.Config.LibDefaults.TCPConnGen)
+	} else {
+		r, err = dialSendTCP(kdcs, b)
 	}
 
 	if err != nil {
@@ -242,6 +244,56 @@ func dialSendTCPCustom(kdcs map[int]string, b []byte, tcpConnGen func(string) (*
 		return rb, nil
 	}
 	return nil, fmt.Errorf("error sending to a KDC: %s", strings.Join(errs, "; "))
+}
+
+// dialSendTCPGeneric dials KDCs using a generic net.Conn dialer (e.g., SOCKS5 proxy).
+func dialSendTCPGeneric(kdcs map[int]string, b []byte, dialer func(string) (net.Conn, error)) ([]byte, error) {
+	var errs []string
+	for i := 1; i <= len(kdcs); i++ {
+		conn, err := dialer(kdcs[i])
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("error establishing connection to %s: %v", kdcs[i], err))
+			continue
+		}
+		if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			errs = append(errs, fmt.Sprintf("error setting deadline on connection to %s: %v", kdcs[i], err))
+			continue
+		}
+		rb, err := sendTCPGeneric(conn, b)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("error sending to %s: %v", kdcs[i], err))
+			continue
+		}
+		return rb, nil
+	}
+	return nil, fmt.Errorf("error sending to a KDC: %s", strings.Join(errs, "; "))
+}
+
+// sendTCPGeneric sends bytes over a generic net.Conn (used for proxy connections).
+func sendTCPGeneric(conn net.Conn, b []byte) ([]byte, error) {
+	defer conn.Close()
+	hb := make([]byte, 4, 4)
+	binary.BigEndian.PutUint32(hb, uint32(len(b)))
+	b = append(hb, b...)
+	_, err := conn.Write(b)
+	if err != nil {
+		return nil, fmt.Errorf("error sending to KDC (%s): %v", conn.RemoteAddr().String(), err)
+	}
+	sh := make([]byte, 4, 4)
+	_, err = conn.Read(sh)
+	if err != nil {
+		return nil, fmt.Errorf("error reading response size header: %v", err)
+	}
+	s := binary.BigEndian.Uint32(sh)
+	rb := make([]byte, s, s)
+	_, err = io.ReadFull(conn, rb)
+	if err != nil {
+		return nil, fmt.Errorf("error reading response: %v", err)
+	}
+	if len(rb) < 1 {
+		return nil, fmt.Errorf("no response data from KDC %s", conn.RemoteAddr().String())
+	}
+	return rb, nil
 }
 
 // sendTCP sends bytes to connection over TCP.

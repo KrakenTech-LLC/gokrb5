@@ -1,10 +1,11 @@
 package types
 
 import (
+	"testing"
+
 	"github.com/KrakenTech-LLC/gokrb5/v8/iana/flags"
 	"github.com/jcmturner/gofork/encoding/asn1"
 	"github.com/stretchr/testify/assert"
-	"testing"
 )
 
 func TestKerberosFlags_SetFlag(t *testing.T) {

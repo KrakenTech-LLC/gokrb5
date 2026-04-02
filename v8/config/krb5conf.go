@@ -82,6 +82,7 @@ type LibDefaults struct {
 	UDPPreferenceLimit    int           // 1 means to always use tcp. MIT krb5 has a default value of 1465, and it prevents user setting more than 32700.
 	VerifyAPReqNofail     bool          //default false
 	TCPConnGen            func(string) (*net.TCPConn, error)
+	TCPDialer             func(string) (net.Conn, error) // proxy-friendly alternative to TCPConnGen; takes precedence
 	UDPConnGen            func(string) (*net.UDPConn, error)
 }
 

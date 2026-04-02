@@ -103,17 +103,17 @@ type Attribute struct {
 
 // OIDs for CMS and PKINIT
 var (
-	OIDData             = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 1}
-	OIDSignedData       = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 2}
-	OIDSHA256           = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 1}
-	OIDRSAEncryption    = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 1}
-	OIDRSASHA256        = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 11}
+	OIDData          = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 1}
+	OIDSignedData    = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 2}
+	OIDSHA256        = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 1}
+	OIDRSAEncryption = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 1}
+	OIDRSASHA256     = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 11}
 	// Required for PKINIT per RFC 4556 — Windows KDCs validate these specifically.
-	OIDPKINITAuthData = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 2, 3, 1}        // id-pkinit-authData
-	OIDSHA1           = asn1.ObjectIdentifier{1, 3, 14, 3, 2, 26}             // sha1
-	OIDSHA1RSA        = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 5}     // sha1WithRSAEncryption
-	OIDContentType    = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 3}     // contentType attr
-	OIDMessageDigest  = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 4}     // messageDigest attr
+	OIDPKINITAuthData = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 2, 3, 1}     // id-pkinit-authData
+	OIDSHA1           = asn1.ObjectIdentifier{1, 3, 14, 3, 2, 26}         // sha1
+	OIDSHA1RSA        = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 5} // sha1WithRSAEncryption
+	OIDContentType    = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 3} // contentType attr
+	OIDMessageDigest  = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 4} // messageDigest attr
 )
 
 // CreatePKINITAuthPack creates a basic AuthPack for PKINIT
