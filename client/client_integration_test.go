@@ -14,6 +14,9 @@ import (
 	"time"
 
 	"fmt"
+	"strings"
+	"sync"
+
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/jcmturner/gokrb5.v7/client"
 	"gopkg.in/jcmturner/gokrb5.v7/config"
@@ -23,8 +26,6 @@ import (
 	"gopkg.in/jcmturner/gokrb5.v7/spnego"
 	"gopkg.in/jcmturner/gokrb5.v7/test"
 	"gopkg.in/jcmturner/gokrb5.v7/test/testdata"
-	"strings"
-	"sync"
 )
 
 func TestClient_SuccessfulLogin_Keytab(t *testing.T) {

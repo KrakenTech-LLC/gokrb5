@@ -2,11 +2,12 @@ package client
 
 import (
 	"encoding/hex"
+	"testing"
+
 	"gopkg.in/jcmturner/gokrb5.v7/config"
 	"gopkg.in/jcmturner/gokrb5.v7/keytab"
 	"gopkg.in/jcmturner/gokrb5.v7/test"
 	"gopkg.in/jcmturner/gokrb5.v7/test/testdata"
-	"testing"
 )
 
 func TestClient_Login_DNSKDCs(t *testing.T) {

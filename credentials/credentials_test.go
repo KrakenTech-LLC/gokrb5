@@ -1,9 +1,10 @@
 package credentials
 
 import (
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 	goidentity "gopkg.in/jcmturner/goidentity.v3"
-	"testing"
 )
 
 func TestImplementsInterface(t *testing.T) {

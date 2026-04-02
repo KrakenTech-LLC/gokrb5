@@ -2,9 +2,10 @@
 package service
 
 import (
-	"gopkg.in/jcmturner/gokrb5.v7/types"
 	"sync"
 	"time"
+
+	"gopkg.in/jcmturner/gokrb5.v7/types"
 )
 
 // Replay cache is required as specified in RFC 4120 section 3.2.3
