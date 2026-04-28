@@ -9,15 +9,38 @@ import (
 )
 
 // ChangePasswdMsg generates a Set Password request (RFC 3244, version 0xff80)
-// using the ChangePasswdData ASN.1 structure with TargName and TargRealm.
-// Also returns the subkey needed to decrypt the reply.
+// with TargName and TargRealm in the ChangePasswdData. This is an admin
+// "set another user's password" operation — the KDC checks that the caller
+// has "Reset Password" rights on the target object.
 func ChangePasswdMsg(cname types.PrincipalName, realm, password string, tkt messages.Ticket, sessionKey types.EncryptionKey) (r Request, k types.EncryptionKey, err error) {
-	// Create change password data struct and marshal to bytes
 	chgpasswd := ChangePasswdData{
 		NewPasswd: []byte(password),
 		TargName:  cname,
 		TargRealm: realm,
 	}
+	return buildChangePasswdRequest(cname, realm, chgpasswd, tkt, sessionKey)
+}
+
+// ChangeOwnPasswdMsg generates a Change Password request (RFC 3244, version 0xff80)
+// WITHOUT TargName and TargRealm. Per RFC 3244 §2:
+//
+//	"If the TargName or the TargRealm field is missing, the change is for
+//	 the authenticating user."
+//
+// This is the self-service "change own password" variant. The KDC does NOT
+// require "Reset Password" rights — it only checks that the caller is changing
+// their own password. Works for users and machine accounts alike.
+func ChangeOwnPasswdMsg(newPassword string, cname types.PrincipalName, realm string, tkt messages.Ticket, sessionKey types.EncryptionKey) (r Request, k types.EncryptionKey, err error) {
+	chgpasswd := ChangePasswdData{
+		NewPasswd: []byte(newPassword),
+		// TargName and TargRealm intentionally omitted — makes this a self-change
+	}
+	return buildChangePasswdRequest(cname, realm, chgpasswd, tkt, sessionKey)
+}
+
+// buildChangePasswdRequest is the shared implementation for building a kpasswd
+// request message. Both ChangePasswdMsg and ChangeOwnPasswdMsg use this.
+func buildChangePasswdRequest(cname types.PrincipalName, realm string, chgpasswd ChangePasswdData, tkt messages.Ticket, sessionKey types.EncryptionKey) (r Request, k types.EncryptionKey, err error) {
 	chpwdb, err := chgpasswd.Marshal()
 	if err != nil {
 		err = krberror.Errorf(err, krberror.KRBMsgError, "error marshaling change passwd data")
@@ -65,57 +88,6 @@ func ChangePasswdMsg(cname types.PrincipalName, realm, password string, tkt mess
 	r = Request{
 		APREQ:   APreq,
 		KRBPriv: kpriv,
-	}
-	return
-}
-
-// ChangeOwnPasswdMsg generates a Change Password request (RFC 2222, version 0x0001)
-// using a simple password payload (raw new password bytes in KRB-PRIV UserData).
-// This is the "change own password" variant — the KDC treats this as a self-service
-// password change, which doesn't require "Reset Password" rights on the target object.
-func ChangeOwnPasswdMsg(newPassword string, tkt messages.Ticket, sessionKey types.EncryptionKey) (r Request, k types.EncryptionKey, err error) {
-	// Generate authenticator — use empty cname; the identity comes from the ticket
-	auth, err := types.NewAuthenticator(tkt.Realm, tkt.SName)
-	if err != nil {
-		err = krberror.Errorf(err, krberror.KRBMsgError, "error generating new authenticator")
-		return
-	}
-	etype, err := crypto.GetEtype(sessionKey.KeyType)
-	if err != nil {
-		err = krberror.Errorf(err, krberror.KRBMsgError, "error generating subkey etype")
-		return
-	}
-	err = auth.GenerateSeqNumberAndSubKey(etype.GetETypeID(), etype.GetKeyByteSize())
-	if err != nil {
-		err = krberror.Errorf(err, krberror.KRBMsgError, "error generating subkey")
-		return
-	}
-	k = auth.SubKey
-
-	// Generate AP_REQ
-	APreq, err := messages.NewAPReq(tkt, sessionKey, auth)
-	if err != nil {
-		return
-	}
-
-	// RFC 2222: UserData is just the new password in UTF-8
-	kp := messages.EncKrbPrivPart{
-		UserData:       []byte(newPassword),
-		Timestamp:      auth.CTime,
-		Usec:           auth.Cusec,
-		SequenceNumber: auth.SeqNumber,
-	}
-	kpriv := messages.NewKRBPriv(kp)
-	err = kpriv.EncryptEncPart(k)
-	if err != nil {
-		err = krberror.Errorf(err, krberror.EncryptingError, "error encrypting change passwd data")
-		return
-	}
-
-	r = Request{
-		APREQ:   APreq,
-		KRBPriv: kpriv,
-		Version: 1, // RFC 2222 version = 0x0001
 	}
 	return
 }
