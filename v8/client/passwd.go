@@ -20,6 +20,7 @@ const (
 )
 
 // ChangePasswd changes the password of the client to the value provided.
+// Uses RFC 3244 Set Password protocol (version 0xff80) with ChangePasswdData.
 func (cl *Client) ChangePasswd(newPasswd string) (bool, error) {
 	ASReq, err := messages.NewASReqForChgPasswd(cl.Credentials.Domain(), cl.Config, cl.Credentials.CName())
 	if err != nil {
@@ -31,6 +32,41 @@ func (cl *Client) ChangePasswd(newPasswd string) (bool, error) {
 	}
 
 	msg, key, err := kadmin.ChangePasswdMsg(cl.Credentials.CName(), cl.Credentials.Domain(), newPasswd, ASRep.Ticket, ASRep.DecryptedEncPart.Key)
+	if err != nil {
+		return false, err
+	}
+	r, err := cl.sendToKPasswd(msg)
+	if err != nil {
+		return false, err
+	}
+	err = r.Decrypt(key)
+	if err != nil {
+		return false, err
+	}
+	if r.ResultCode != KRB5_KPASSWD_SUCCESS {
+		return false, fmt.Errorf("error response from kadmin: code: %d; result: %s; krberror: %v", r.ResultCode, r.Result, r.KRBError)
+	}
+	cl.Credentials.WithPassword(newPasswd)
+	return true, nil
+}
+
+// ChangeOwnPasswd changes the client's password using RFC 2222 Change Password
+// protocol (version 0x0001). This uses a simple password payload instead of the
+// ChangePasswdData ASN.1 structure. Some KDCs (Windows AD) treat the 0xff80
+// Set Password version as an admin operation requiring "Reset Password" rights,
+// while the 0x0001 version is treated as a self-service "Change Password"
+// operation that any user/computer can perform on their own account.
+func (cl *Client) ChangeOwnPasswd(newPasswd string) (bool, error) {
+	ASReq, err := messages.NewASReqForChgPasswd(cl.Credentials.Domain(), cl.Config, cl.Credentials.CName())
+	if err != nil {
+		return false, err
+	}
+	ASRep, err := cl.ASExchange(cl.Credentials.Domain(), ASReq, 0)
+	if err != nil {
+		return false, err
+	}
+
+	msg, key, err := kadmin.ChangeOwnPasswdMsg(newPasswd, ASRep.Ticket, ASRep.DecryptedEncPart.Key)
 	if err != nil {
 		return false, err
 	}

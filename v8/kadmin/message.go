@@ -19,6 +19,7 @@ const (
 type Request struct {
 	APREQ   messages.APReq
 	KRBPriv messages.KRBPriv
+	Version int // 0 or 0xff80 = Set Password (RFC 3244), 1 = Change Password (RFC 2222)
 }
 
 // Reply message for a password change.
@@ -36,7 +37,14 @@ type Reply struct {
 
 // Marshal a Request into a byte slice.
 func (m *Request) Marshal() (b []byte, err error) {
-	b = []byte{255, 128} // protocol version number: contains the hex constant 0xff80 (big-endian integer).
+	ver := uint16(0xff80) // default: RFC 3244 Set Password
+	if m.Version == 1 {
+		ver = 0x0001 // RFC 2222 Change Password
+	}
+	verBytes := make([]byte, 2)
+	binary.BigEndian.PutUint16(verBytes, ver)
+	b = verBytes
+
 	ab, e := m.APREQ.Marshal()
 	if e != nil {
 		err = fmt.Errorf("error marshaling AP_REQ: %v", e)
